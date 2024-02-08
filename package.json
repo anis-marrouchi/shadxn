@@ -1,6 +1,6 @@
 {
   "name": "shadcn-cli",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Add components (extended) to your apps.",
   "publishConfig": {
     "access": "public"
@@ -23,10 +23,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/anis-marrouchi/shadxn-cli.git"
+    "url": "https://github.com/anis-marrouchi/shadcn-cli.git"
   },
   "files": [
-    "dist"
+    "dist",
+    "src/registries"
   ],
   "keywords": [
     "components",

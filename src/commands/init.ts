@@ -202,6 +202,12 @@ export async function promptForConfig(
       utils: options.utils,
       components: options.components,
     },
+    registries: [
+      {
+        name: "shadcn",
+        baseUrl: "https://ui.shadcn.com",
+      }
+    ],
   })
 
   if (!skip) {

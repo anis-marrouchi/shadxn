@@ -1,5 +1,5 @@
 components
 dist
 .turbo
+node_modules/
 test
-node_modules
