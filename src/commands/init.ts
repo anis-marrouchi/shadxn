@@ -224,7 +224,6 @@ export async function promptForConfig(
       process.exit(0)
     }
   }
-
   // Write to file.
   logger.info("")
   const spinner = ora(`Writing components.json...`).start()
@@ -298,6 +297,12 @@ export async function promptForMinimalConfig(
     rsc: defaultConfig?.rsc,
     tsx: defaultConfig?.tsx,
     aliases: defaultConfig?.aliases,
+    registries: [
+      {
+        name: "shadcn",
+        baseUrl: "https://ui.shadcn.com",
+      }
+    ],
   })
 
   // Write to file.
