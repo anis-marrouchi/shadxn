@@ -93,7 +93,10 @@ export const add = new Command()
               value: registry.baseUrl,
             })),
           });
-
+          if (!registry) {
+            logger.error(`No registry selected. Exiting.`);
+            process.exit(1);
+          }
           setBaseUrl(registry);
         }
       }
