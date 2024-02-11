@@ -109,7 +109,7 @@ pnpm run dev
 npx shadxn registry activate my-registry
 
 # 5. Add a component from your custom registry
-npx shadxn add your-component my-registry
+npx shadxn add your-component -r my-registry
 ```
 
 ## Documentation
