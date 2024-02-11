@@ -14,7 +14,7 @@ async function main() {
   const packageInfo = await getPackageInfo()
 
   const program = new Command()
-    .name("shadcn-cli")
+    .name("shadxn")
     .description("add components and dependencies to your project")
     .version(
       packageInfo.version || "1.0.0",

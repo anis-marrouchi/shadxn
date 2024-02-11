@@ -1,6 +1,6 @@
 {
-  "name": "shadcn-cli",
-  "version": "0.0.6",
+  "name": "shadxn",
+  "version": "0.0.1",
   "description": "Add components (extended) and more to your apps.",
   "publishConfig": {
     "access": "public"
@@ -23,7 +23,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/anis-marrouchi/shadcn-cli.git"
+    "url": "https://github.com/anis-marrouchi/shadxn.git"
   },
   "files": [
     "dist",
@@ -42,9 +42,9 @@
   "type": "module",
   "exports": "./dist/index.js",
   "bin": {
-    "shadcn": "./dist/index.js",
+    "shadxn": "./dist/index.js",
     "shadxn-ui": "./dist/index.js",
-    "shadcn-cli": "./dist/index.js",
+    "shadxn-cli": "./dist/index.js",
     "ui": "./dist/index.js"
   },
   "scripts": {
