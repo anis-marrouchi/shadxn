@@ -18,10 +18,6 @@ This project builds on top of the original `Shadcn UI` CLI. We are deeply gratef
 - **Compatibility:** Extendable to various frameworks and libraries, `shadxn` is designed to fit into any development ecosystem.
 
 ## Installation
-To accommodate users who prefer to use `npx` for running commands without installing them globally, you can add a section that explains how to use `shadxn` with `npx`. This is especially useful for one-off executions or for trying out the CLI without adding it to the global package registry. Here's how you can update the installation and usage sections of your README.md to include `npx`:
-
-```markdown
-## Installation
 
 `shadxn` can be installed using various package managers or run directly with `npx` for immediate usage without global installation. Choose the method that best fits your workflow:
 
