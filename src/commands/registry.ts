@@ -15,6 +15,7 @@ import { registry as buildRegister } from "@/src/registries/shadxn/registry";
 import { registrySchema } from "@/src/registries/shadxn/schema";
 import { styles } from "@/src/registries/shadxn/styles";
 import { themes } from "@/src/registries/shadxn/themes";
+import { basename } from "path";
 
 const currentFileUrl = new URL(import.meta.url);
 const __dirname = path.dirname(currentFileUrl.pathname);
