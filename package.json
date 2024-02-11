@@ -1,6 +1,6 @@
 {
   "name": "shadxn",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Add components (extended) and more to your apps.",
   "publishConfig": {
     "access": "public"
@@ -44,8 +44,7 @@
   "bin": {
     "shadxn": "./dist/index.js",
     "shadxn-ui": "./dist/index.js",
-    "shadxn-cli": "./dist/index.js",
-    "ui": "./dist/index.js"
+    "shadxn-cli": "./dist/index.js"
   },
   "scripts": {
     "dev": "tsup --watch",
