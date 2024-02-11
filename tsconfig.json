@@ -2,6 +2,9 @@
   "$schema": "https://json.schemastore.org/tsconfig",
   "display": "Default",
   "compilerOptions": {
+    "module": "ESNext",
+    "target": "ESNext", 
+    "allowSyntheticDefaultImports": true,
     "composite": false,
     "declaration": true,
     "declarationMap": true,
@@ -20,6 +23,6 @@
       "@/*": ["./*"]
     }
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.mjs"],
   "exclude": ["node_modules"]
 }

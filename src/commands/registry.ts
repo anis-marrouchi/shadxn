@@ -7,14 +7,11 @@ import path from "path";
 import template from "lodash.template";
 import { rimraf } from "rimraf";
 import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { handleError } from "@/src/utils/handle-error";
 import { z } from "zod";
 import prompts from "prompts";
 
-import { colorMapping, colors } from "@/src/registries/shadxn/colors";
-import { registry as buildRegister } from "@/src/registries/shadxn/registry";
-import { registrySchema } from "@/src/registries/shadxn/schema";
-import { styles } from "@/src/registries/shadxn/styles";
-import { themes } from "@/src/registries/shadxn/themes";
+import { registrySchema } from "@/src/utils/registry/schema";
 import { basename } from "path";
 
 const currentFileUrl = new URL(import.meta.url);
@@ -49,7 +46,7 @@ registry
   .argument("[project]", "The project to build (default: nextjs)", "nextjs")
   .action(async (project) => {
     try {
-      await build(project); // Assuming build accepts a project argument
+      await build(project);
     } catch (error) {
       logger.error(`Error building registry: ${error.message}`);
     }
@@ -154,11 +151,15 @@ async function build(project) {
 }
 
 async function buildNextjs() {
+  try {
   logger.info("Building registry for Next.js project...");
   const REGISTRY_PATH = path.join(process.cwd(), "public/registry");
+  const {registry: buildRegister} = await import(path.join(process.cwd(), "src/registry/registry.mjs"));
+  const {styles} = await import(path.join(process.cwd(), "src/registry/styles.mjs"));
+  const {colorMapping, colors} = await import(path.join(process.cwd(), "src/registry/colors.mjs"));;
+  const {themes} = await import(path.join(process.cwd(), "src/registry/themes.mjs"));
 
   const result = registrySchema.safeParse(buildRegister);
-
   if (!result.success) {
     console.error(result.error);
     process.exit(1);
@@ -179,7 +180,6 @@ async function buildNextjs() {
       if (item.type !== "components:ui") {
         continue;
       }
-
       const files = item.files?.map((file) => {
         const content = fs.readFileSync(
           // to src or to not src, this the question
@@ -535,6 +535,9 @@ async function buildNextjs() {
   }
 
   console.log("✅ Done!");
+} catch (error) {
+    handleError(error);
+  }
 }
 
 export { registry };

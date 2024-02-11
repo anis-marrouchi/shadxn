@@ -1,6 +1,4 @@
-import { Registry } from "./schema"
-
-const ui: Registry = [
+const ui = [
   {
     name: "google-gemini-effect",
     type: "components:ui",
@@ -13,9 +11,9 @@ const ui: Registry = [
     dependencies: ["framer-motion", "clsx", "tailwind-merge"],
     files: ["ui/typewriter-effect.tsx"],
   },
-]
+];
 
-const example: Registry = [
+const example = [
   {
     name: "google-gemini-effect-demo",
     type: "components:example",
@@ -28,6 +26,8 @@ const example: Registry = [
     registryDependencies: ["typewriter-effect"],
     files: ["example/typewriter-effect-demo.tsx"],
   },
-]
+];
 
-export const registry: Registry = [...ui, ...example]
+
+const registry = [...ui, ...example];
+export default registry;
