@@ -1,7 +1,7 @@
 {
   "name": "shadcn-cli",
   "version": "0.0.6",
-  "description": "Add components (extended) to your apps.",
+  "description": "Add components (extended) and more to your apps.",
   "publishConfig": {
     "access": "public"
   },

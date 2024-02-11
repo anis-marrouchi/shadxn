@@ -1,10 +1,9 @@
 // @ts-nocheck
 import { Command } from "commander";
 import { logger } from "@/src/utils/logger";
-// Import any additional utilities you might need for file manipulation, logging, etc.
 import * as fsx from "fs-extra";
 import * as fs from "fs";
-import path, { basename } from "path";
+import path from "path";
 import template from "lodash.template";
 import { rimraf } from "rimraf";
 
@@ -17,16 +16,38 @@ import { themes } from "@/src/registries/shadxn/themes";
 const currentFileUrl = new URL(import.meta.url);
 const __dirname = path.dirname(currentFileUrl.pathname);
 
-const registry = new Command()
-  .name("registry")
-  .description("Manage the project registry.")
-  .argument("<action>", "The registry action to perform (init, build)")
-  .argument("[project]", "The project to manage (e.g. nextjs)")
-  .action(async (action, project) => {
+// Main registry command
+const registry = new Command("registry").description(
+  "Manage the project registry."
+);
+
+// Subcommand for initialization
+registry
+  .command("init")
+  .description("Initialize the registry for a project.")
+  .argument(
+    "[project]",
+    "The project to initialize (default: nextjs)",
+    "nextjs"
+  )
+  .action(async (project) => {
     try {
-      await handleAction(action, (project = "nextjs"));
+      await init(project); // Assuming init accepts a project argument
     } catch (error) {
-      logger.error(`Error executing registry command: ${error.message}`);
+      logger.error(`Error initializing registry: ${error.message}`);
+    }
+  });
+
+// Subcommand for building
+registry
+  .command("build")
+  .description("Build the registry for a project.")
+  .argument("[project]", "The project to build (default: nextjs)", "nextjs")
+  .action(async (project) => {
+    try {
+      await build(project); // Assuming build accepts a project argument
+    } catch (error) {
+      logger.error(`Error building registry: ${error.message}`);
     }
   });
 
@@ -58,28 +79,48 @@ async function handleAction(action, project) {
   }
 }
 
-async function init() {
-    try {
-        logger.info("Initializing registry...");
-        const source = path.join(__dirname, "..", "src", "registries", "shadxn");
-        const destination = path.join(process.cwd(), "src", "registry");
-
-        // Ensure the destination directory exists
-        await fsx.ensureDir(destination);
-
-        // Copy contents from source to destination
-        await fsx.copy(source, destination, {
-            overwrite: false,
-            errorOnExist: false, // Don't throw error if destination exists
-        });
-
-        console.log("✅ Registry initialized");
-    } catch (err) {
-        console.error("❌ Error initializing registry:", err);
-    }
+async function init(project) {
+  switch (project) {
+    case "nextjs":
+      await initNextjs();
+      break;
+    default:
+      logger.warn("Unsupported project type.");
+  }
 }
 
-async function build() {
+async function initNextjs() {
+  try {
+    logger.info("Initializing registry...");
+    const source = path.join(__dirname, "..", "src", "registries", "shadxn");
+    const destination = path.join(process.cwd(), "src", "registry");
+
+    // Ensure the destination directory exists
+    await fsx.ensureDir(destination);
+
+    // Copy contents from source to destination
+    await fsx.copy(source, destination, {
+      overwrite: false,
+      errorOnExist: false, // Don't throw error if destination exists
+    });
+
+    console.log("✅ Registry initialized");
+  } catch (err) {
+    console.error("❌ Error initializing registry:", err);
+  }
+}
+
+async function build(project) {
+  switch (project) {
+    case "nextjs":
+      await buildNextjs();
+      break;
+    default:
+      logger.warn("Unsupported project type.");
+  }
+}
+
+async function buildNextjs() {
   logger.info("Building registry for Next.js project...");
   const REGISTRY_PATH = path.join(process.cwd(), "public/registry");
 
@@ -108,7 +149,7 @@ async function build() {
 
       const files = item.files?.map((file) => {
         const content = fs.readFileSync(
-            // to src or to not src, this the question
+          // to src or to not src, this the question
           path.join(process.cwd(), "src", "registry", style.name, file),
           "utf8"
         );
