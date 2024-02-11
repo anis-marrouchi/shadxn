@@ -6,6 +6,9 @@ import * as fs from "fs";
 import path from "path";
 import template from "lodash.template";
 import { rimraf } from "rimraf";
+import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { z } from "zod";
+import prompts from "prompts";
 
 import { colorMapping, colors } from "@/src/registries/shadxn/colors";
 import { registry as buildRegister } from "@/src/registries/shadxn/registry";
@@ -51,32 +54,61 @@ registry
     }
   });
 
-async function handleAction(action, project) {
-  // Define a structure to handle project-specific actions
-  const projectActions = {
-    nextjs: {
-      init: async () => await init(),
-      build: async () => await build(),
-      // Add more project-specific actions here
-    },
-    // Add more projects here
-  };
+registry
+  .command("activate")
+  .description("Activate a registry by adding its URL to your project.")
+  .argument("<registryName>", "Name of the registry to activate")
+  .action(async (registryName) => {
+    const cwd = process.cwd();
+    const componentsPath = path.join(cwd, "components.json");
 
-  // Check if the project is supported
-  if (!projectActions[project]) {
-    logger.warn("Unsupported project type.");
-    return;
-  }
+    // Check if components.json exists
+    if (!existsSync(componentsPath)) {
+      logger.warn(
+        `components.json does not exist. Have you run the init command?`
+      );
+      return;
+    }
 
-  // Check if the action is supported for the project
-  const projectAction = projectActions[project][action];
-  if (projectAction) {
-    await projectAction();
-  } else {
-    logger.error(
-      `Unknown or unsupported action '${action}' for project type '${project}'.`
+    // Prompt for the registry URL
+    const answers = await prompts([
+      {
+        type: "text",
+        name: "url",
+        message: `Enter the URL for the ${registryName} registry:`,
+        validate: (input) => isValidUrl(input) || "Please enter a valid URL.",
+      },
+    ]);
+
+    // Read the existing components.json
+    let components = JSON.parse(readFileSync(componentsPath, "utf8"));
+
+    // Ensure the registries array exists
+    components.registries = components.registries || [];
+
+    // Check if the registry already exists
+    const registryIndex = components.registries.findIndex(
+      (registry) => registry.name === registryName
     );
-  }
+
+    if (registryIndex > -1) {
+      // Update existing registry
+      components.registries[registryIndex].baseUrl = answers.url;
+      logger.info(`Updated ${registryName} registry URL to ${answers.url}`);
+    } else {
+      // Add new registry
+      components.registries.push({ name: registryName, baseUrl: answers.url });
+      logger.info(`Added ${registryName} registry with URL ${answers.url}`);
+    }
+
+    // Write the updated components.json back to disk
+    writeFileSync(componentsPath, JSON.stringify(components, null, 2), "utf8");
+  });
+
+function isValidUrl(url) {
+  const urlRule = z.string().url();
+  const result = urlRule.safeParse(url);
+  return result.success;
 }
 
 async function init(project) {
