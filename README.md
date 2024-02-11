@@ -1,43 +1,85 @@
-# shadcn-ui
 
-A CLI for adding components to your project.
+# shadxn
+
+`shadxn` is an experimental CLI tool that builds upon the foundation of the `shadcn-ui` CLI. It is designed to enhance your development workflow by allowing the integration of components and dependencies into your project. This tool introduces the flexibility of selecting component registries, enabling developers to add custom registries for personalized or public sharing of components. We extend our deepest gratitude to the `shadcn-ui` project and its contributors for their foundational work that made `shadxn` possible.
+
+## Acknowledgment 
+This project builds on top of the original `Shadcn UI` CLI. We are deeply grateful to `Shadcn` and all contributors to the `Shadcn UI` project for their pioneering work and for laying the groundwork that `shadxn` now builds upon.
+ -  **Project:** Shadcn UI
+ -  **Author:** [Shadcn](https://twitter.com/shadcn) 
+ -  **License:** MIT 
+ -  **Source:** [https://github.com/shadcn/ui](https://github.com/shadcn-ui/ui)
+
+## Features
+
+- **Custom Registry Support:** Initialize and manage custom registries to declare your own components.
+- **Enhanced `add` Command:** Add components from a selected registry, allowing for greater flexibility and customization.
+- **Project Initialization:** Initialize your project with default registries in `components.js`, preparing it for immediate development.
+- **Compatibility:** Extendable to various frameworks and libraries, `shadxn` is designed to fit into any development ecosystem.
 
 ## Usage
 
-Use the `init` command to initialize dependencies for a new project.
-
-The `init` command installs dependencies, adds the `cn` util, configures `tailwind.config.js`, and CSS variables for the project.
-
 ```bash
-npx shadcn-ui init
+Usage: shadxn [options] [command]
+
+Options:
+  -v, --version                  display the version number
+  -h, --help                     display help for command
+
+Commands:
+  init [options]                 initialize your project and install dependencies, adds default registries
+  add [options] [components...]  add components to your project from selected registries
+  diff [options] [component]     check for component updates against the registry
+  registry <action> [project]    manage the project's component registry
+  help [command]                 display help for command
 ```
 
-## add
+### Commands in Detail
 
-Use the `add` command to add components to your project.
+- **init:** Sets up your project with essential dependencies and a default registry in `components.js` for components management.
+- **add:** Enhances the original `add` command to allow selection of a registry for component retrieval, streamlining the addition of components to your project.
+- **registry:** A new command to initialize and manage custom registries, supporting actions like `init` for registry setup and `build` for registry deployment.
 
-The `add` command adds a component to your project and installs all required dependencies.
-
-```bash
-npx shadcn-ui add [component]
-```
-
-### Example
+### Examples
 
 ```bash
-npx shadcn-ui add alert-dialog
-```
+# Initialize your project
+npx shadxn init
 
-You can also run the command without any arguments to view a list of all available components:
+# Add a component from a shadcn registry
+npx shadxn add button
 
-```bash
-npx shadcn-ui add
+# Or create and use your custom registry
+# 1. Create your custom registry
+npx shadxn registry init
+# Start adding your custom components and declare them within the registry/registry.tsx file
+# 2. Build your custom registry
+npx shadxn registry build
+
+# 3. Run your local registry or deploy to Vercel
+pnpm run dev
+
+# 4. Activate your custom registry
+npx shadxn registry activate my-registry
+
+# 5. Add a component from your custom registry
+npx shadxn add your-component my-registry
 ```
 
 ## Documentation
 
-Visit https://ui.shadcn.com/docs/cli to view the documentation.
+For more detailed information and documentation, visit [https://ui.shadcn.com/docs/cli](https://ui.shadcn.com/docs/cli).
 
 ## License
 
-Licensed under the [MIT license](https://github.com/shadcn/ui/blob/main/LICENSE.md).
+`shadxn` is licensed under the [MIT license](https://github.com/anis-marrouchi/shadxn/blob/main/LICENSE.md).
+
+## Objective and Current State
+
+The main objectives of `shadxn` are to:
+- Allow the addition of custom registries for tailored component management.
+- Provide an unopinionated tool that integrates into any workflow without restriction.
+- Enable the creation of custom registries for either internal use or public sharing.
+- Extend its utility across different frameworks and libraries, promoting versatility in development environments.
+
+As an experimental project, `shadxn` is in active development, and contributions, feedback, and suggestions are welcome to enhance its capabilities and reach.
