@@ -17,6 +17,56 @@ This project builds on top of the original `Shadcn UI` CLI. We are deeply gratef
 - **Project Initialization:** Initialize your project with default registries in `components.js`, preparing it for immediate development.
 - **Compatibility:** Extendable to various frameworks and libraries, `shadxn` is designed to fit into any development ecosystem.
 
+## Installation
+To accommodate users who prefer to use `npx` for running commands without installing them globally, you can add a section that explains how to use `shadxn` with `npx`. This is especially useful for one-off executions or for trying out the CLI without adding it to the global package registry. Here's how you can update the installation and usage sections of your README.md to include `npx`:
+
+```markdown
+## Installation
+
+`shadxn` can be installed using various package managers or run directly with `npx` for immediate usage without global installation. Choose the method that best fits your workflow:
+
+### Using npm
+
+```bash
+npm install -g shadxn
+```
+
+This command installs `shadxn` globally on your machine, making it accessible from anywhere in your terminal.
+
+### Using Yarn
+
+```bash
+yarn global add shadxn
+```
+
+Yarn users can also install `shadxn` globally, ensuring it's available from any terminal session.
+
+### Using pnpm
+
+```bash
+pnpm add -g shadxn
+```
+
+For those preferring `pnpm` for its efficient handling of node modules, this command will globally install `shadxn`.
+
+### Using Bun
+
+```bash
+bun add -g shadxn
+```
+
+If you're using `Bun`, a modern JavaScript runtime, this command will globally install `shadxn` on your system.
+
+### Using npx (No Installation Required)
+
+For a quick, one-time use, you can run `shadxn` directly with `npx` without needing to install it globally:
+
+```bash
+npx shadxn [command]
+```
+
+This method is particularly useful for running the latest version of `shadxn` without affecting your global package setup.
+
 ## Usage
 
 ```bash
