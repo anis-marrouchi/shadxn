@@ -1,6 +1,7 @@
 
 # shadxn
 [Getting Started](https://medium.com/@anis.marrouchi/revolutionizing-component-management-with-shadxn-73569fdfd0d6)
+
 `shadxn` is an experimental CLI tool that builds upon the foundation of the `shadcn-ui` CLI. It is designed to enhance your development workflow by allowing the integration of components and dependencies into your project. This tool introduces the flexibility of selecting component registries, enabling developers to add custom registries for personalized or public sharing of components. We extend our deepest gratitude to the `shadcn-ui` project and its contributors for their foundational work that made `shadxn` possible.
 
 ## Acknowledgment 
