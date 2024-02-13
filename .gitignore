@@ -3,3 +3,4 @@ dist
 .turbo
 node_modules/
 test
+.DS_store
