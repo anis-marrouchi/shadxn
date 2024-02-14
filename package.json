@@ -1,6 +1,6 @@
 {
   "name": "shadxn",
-  "version": "0.0.7",
+  "version": "0.0.9",
   "description": "Add components (extended) and more to your apps.",
   "publishConfig": {
     "access": "public"
