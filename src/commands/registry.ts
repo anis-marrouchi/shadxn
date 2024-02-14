@@ -122,7 +122,10 @@ async function init(project) {
 async function initNextjs() {
   try {
     logger.info("Initializing registry...");
-    const source = path.join(__dirname, "..", "src", "registries", "shadxn");
+    let source = path.join(__dirname, "..", "src", "registries", "shadxn");
+    source = decodeURIComponent(source);
+    // Remove the leading backslash if present for Windows Users
+    source = source.startsWith('\\') ? source.substring(1) : source;
     const destination = path.join(process.cwd(), "src", "registry");
 
     // Ensure the destination directory exists
