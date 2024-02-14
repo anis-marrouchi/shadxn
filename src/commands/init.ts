@@ -205,7 +205,7 @@ export async function promptForConfig(
     registries: [
       {
         name: "shadcn",
-        baseUrl: "https://ui.shadcn.com",
+        baseUrl: process.env.COMPONENTS_REGISTRY_URL ?? "https://ui.shadcn.com",
       }
     ],
   })
