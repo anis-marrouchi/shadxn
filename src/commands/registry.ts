@@ -10,7 +10,7 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { handleError } from "@/src/utils/handle-error";
 import { z } from "zod";
 import prompts from "prompts";
-
+import { handleError } from "@/src/utils/handle-error";
 import { registrySchema } from "@/src/utils/registry/schema";
 import { basename } from "path";
 
@@ -136,7 +136,7 @@ async function initNextjs() {
 
     console.log("✅ Registry initialized");
   } catch (err) {
-    console.error("❌ Error initializing registry:", err);
+    handleError(err);
   }
 }
 
