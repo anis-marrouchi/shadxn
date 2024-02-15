@@ -13,7 +13,9 @@ import prompts from "prompts";
 import { handleError } from "@/src/utils/handle-error";
 import { registrySchema } from "@/src/utils/registry/schema";
 import { basename } from "path";
-
+import { pathToFileURL } from 'url';
+// Convert a file system path to a file URL
+const toFileUrl = (filePath) => pathToFileURL(filePath).href;
 const currentFileUrl = new URL(import.meta.url);
 const __dirname = path.dirname(currentFileUrl.pathname);
 
@@ -157,10 +159,10 @@ async function buildNextjs() {
   try {
   logger.info("Building registry for Next.js project...");
   const REGISTRY_PATH = path.join(process.cwd(), "public/registry");
-  const {registry: buildRegister} = await import(path.join(process.cwd(), "src/registry/registry.mjs"));
-  const {styles} = await import(path.join(process.cwd(), "src/registry/styles.mjs"));
-  const {colorMapping, colors} = await import(path.join(process.cwd(), "src/registry/colors.mjs"));;
-  const {themes} = await import(path.join(process.cwd(), "src/registry/themes.mjs"));
+  const {registry: buildRegister} = await import(toFileUrl(path.join(process.cwd(), "src/registry/registry.mjs")));
+  const {styles} = await import(toFileUrl(path.join(process.cwd(), "src/registry/styles.mjs")));
+  const {colorMapping, colors} = await import(toFileUrl(path.join(process.cwd(), "src/registry/colors.mjs")));;
+  const {themes} = await import(toFileUrl(path.join(process.cwd(), "src/registry/themes.mjs")));
 
   const result = registrySchema.safeParse(buildRegister);
   if (!result.success) {
