@@ -30,4 +30,4 @@ const example = [
 
 
 const registry = [...ui, ...example];
-export default registry;
+export {registry};
