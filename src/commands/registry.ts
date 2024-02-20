@@ -11,8 +11,7 @@ import { handleError } from "@/src/utils/handle-error";
 import { z } from "zod";
 import prompts from "prompts";
 import { handleError } from "@/src/utils/handle-error";
-import { registrySchema } from "@/src/utils/registry/schema";
-import { basename } from "path";
+import { registrySchema, types } from "@/src/utils/registry/schema";
 import { pathToFileURL } from 'url';
 // Convert a file system path to a file URL
 const toFileUrl = (filePath) => pathToFileURL(filePath).href;
@@ -30,12 +29,13 @@ registry
   .description("Initialize the registry for a project.")
   .argument(
     "[project]",
-    "The project to initialize (default: nextjs)",
-    "nextjs"
+    "The project to initialize (default: default)",
+    "default"
   )
-  .action(async (project) => {
+  .option("-r, --registry <registry>", "the registry to use. We have blank, shadcn and aceternity. (default: blank)", "shadcn")
+  .action(async (project, opts) => {
     try {
-      await init(project); // Assuming init accepts a project argument
+      await init(project, opts); // Assuming init accepts a project argument
     } catch (error) {
       logger.error(`Error initializing registry: ${error.message}`);
     }
@@ -45,7 +45,7 @@ registry
 registry
   .command("build")
   .description("Build the registry for a project.")
-  .argument("[project]", "The project to build (default: nextjs)", "nextjs")
+  .argument("[project]", "The project to build (default: default)", "default")
   .action(async (project) => {
     try {
       await build(project);
@@ -55,9 +55,9 @@ registry
   });
 
 registry
-  .command("activate")
+  .command("add")
   .description("Activate a registry by adding its URL to your project.")
-  .argument("<registryName>", "Name of the registry to activate")
+  .argument("<registryName>", "Name of the registry to add")
   .action(async (registryName) => {
     const cwd = process.cwd();
     const componentsPath = path.join(cwd, "components.json");
@@ -111,20 +111,21 @@ function isValidUrl(url) {
   return result.success;
 }
 
-async function init(project) {
+async function init(project, opts) {
   switch (project) {
-    case "nextjs":
-      await initNextjs();
+    case "default":
+      await initDefault(opts);
       break;
     default:
       logger.warn("Unsupported project type.");
   }
 }
 
-async function initNextjs() {
+async function initDefault(opts) {
   try {
     logger.info("Initializing registry...");
-    let source = path.join(__dirname, "..", "src", "registries", "shadxn");
+    const { registry: registryName } = opts;
+    let source = path.join(__dirname, "..", "src", "registries", registryName);
     source = decodeURIComponent(source);
     // Remove the leading backslash if present for Windows Users
     source = source.startsWith('\\') ? source.substring(1) : source;
@@ -147,15 +148,15 @@ async function initNextjs() {
 
 async function build(project) {
   switch (project) {
-    case "nextjs":
-      await buildNextjs();
+    case "default":
+      await buildDefault();
       break;
     default:
       logger.warn("Unsupported project type.");
   }
 }
 
-async function buildNextjs() {
+async function buildDefault() {
   try {
   logger.info("Building registry for Next.js project...");
   const REGISTRY_PATH = path.join(process.cwd(), "public/registry");
@@ -182,32 +183,32 @@ async function buildNextjs() {
     }
 
     for (const item of result.data) {
-      if (item.type !== "components:ui") {
-        continue;
-      }
       const files = item.files?.map((file) => {
-        const content = fs.readFileSync(
-          // to src or to not src, this the question
-          path.join(process.cwd(), "src", "registry", style.name, file),
-          "utf8"
-        );
+        // Construct the file path relative to the project structure
+        // Adjust the path as necessary based on your project's directory structure
+        const filePath = path.join(process.cwd(), "src", "registry", style.name, item.type.replace('components:', ''), file);
+        // Read the file content
+        const content = fs.readFileSync(filePath, "utf8");
 
         return {
-          name: basename(file),
+          name: path.basename(file), // file name with extension
+          path: file, // preserving the relative path structure
           content,
         };
       });
-
+      
       const payload = {
         ...item,
         files,
       };
 
-      fs.writeFileSync(
-        path.join(targetPath, `${item.name}.json`),
-        JSON.stringify(payload, null, 2),
-        "utf8"
-      );
+      // Determine the target path for each style. Sorry I'm in a rush, I can't finish this.
+      const targetPath = path.join(REGISTRY_PATH, "styles", style.name, `${item.name}.json`);
+      // Ensure the directory exists
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+
+      // Write the payload to the target file
+      fs.writeFileSync(targetPath, JSON.stringify(payload, null, 2), "utf8");
     }
   }
 
@@ -224,7 +225,8 @@ async function buildNextjs() {
   // ----------------------------------------------------------------------------
   // Build registry/index.json.
   // ----------------------------------------------------------------------------
-  const names = result.data.filter((item) => item.type === "components:ui");
+  const names = result.data
+  .filter((item) => types.includes(item.type));
   const registryJson = JSON.stringify(names, null, 2);
   rimraf.sync(path.join(REGISTRY_PATH, "index.json"));
   fs.writeFileSync(

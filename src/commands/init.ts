@@ -206,6 +206,10 @@ export async function promptForConfig(
       {
         name: "shadcn",
         baseUrl: process.env.COMPONENTS_REGISTRY_URL ?? "https://ui.shadcn.com",
+      },
+      {
+        name: "shadxn",
+        baseUrl: "https://ui.shadxn.com"
       }
     ],
   })
@@ -300,7 +304,11 @@ export async function promptForMinimalConfig(
     registries: [
       {
         name: "shadcn",
-        baseUrl: "https://ui.shadcn.com",
+        baseUrl: "https://ui.shadcn.com"
+      },
+      {
+        name: "shadxn",
+        baseUrl: "https://ui.shadxn.com"
       }
     ],
   })

@@ -116,7 +116,7 @@ export async function fetchTree(
 
     return registryWithContentSchema.parse(result);
   } catch (error) {
-    throw new Error(`Failed to fetch tree from registry.`);
+        throw new Error(`Failed to fetch tree from registry.`);
   }
 }
 
@@ -132,7 +132,6 @@ export async function getItemTargetPath(
   if (item.type === "components:ui" && config.aliases.ui) {
     return config.resolvedPaths.ui;
   }
-
   const [parent, type] = item.type.split(":");
   if (!(parent in config.resolvedPaths)) {
     return null;
@@ -157,7 +156,6 @@ async function fetchRegistry(paths: string[]) {
 
     return results;
   } catch (error) {
-    console.log(error);
     throw new Error(`Failed to fetch registry from ${baseUrl}.`);
   }
 }
