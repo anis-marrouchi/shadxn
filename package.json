@@ -1,6 +1,6 @@
 {
   "name": "shadxn",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "description": "Use one tool to add your shadcn-ui, aceternity-ui components. Extend and add your own component registry.",
   "publishConfig": {
     "access": "public"

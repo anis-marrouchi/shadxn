@@ -210,6 +210,10 @@ export async function promptForConfig(
       {
         name: "shadxn",
         baseUrl: "https://ui.shadxn.com"
+      },
+      {
+        name: "aceternity",
+        baseUrl: "https://ui.aceternity.com"
       }
     ],
   })
