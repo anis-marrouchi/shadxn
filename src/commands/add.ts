@@ -36,7 +36,7 @@ export const add = new Command()
   .argument("[components...]", "the components to add")
   .option("-y, --yes", "skip confirmation prompt.", true)
   .option("-o, --overwrite", "overwrite existing files.", false)
-  .option("-r, --registry <registry>", "the registry to use.")
+  .option("-r, --registry <registry>", "the registry to use.", "shadcn")
   .option(
     "-c, --cwd <cwd>",
     "the working directory. defaults to the current directory.",
