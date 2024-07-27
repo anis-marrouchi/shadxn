@@ -26,7 +26,6 @@ export function getBaseUrl() {
 export async function getRegistryIndex() {
   try {
     const [result] = await fetchRegistry(["index.json"]);
-
     return registryIndexSchema.parse(result);
   } catch (error) {
     throw new Error(`Failed to fetch components from registry.`);

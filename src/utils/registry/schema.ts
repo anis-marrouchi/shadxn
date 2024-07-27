@@ -1,7 +1,7 @@
 import { z } from "zod"
 
 // TODO: Every registry has a schema.
-export const types = ["components:ui", "components:component", "components:example", "components:page"] as const;
+export const types = ["components:ui", "components:component", "components:example", "components:page", "components:blocks"] as const;
 // TODO: Extract this to a shared package.
 export const typeSchema = z.enum(types);
 
