@@ -91,31 +91,36 @@ Commands:
 
 ```bash
 # Initialize your project
-npx shadxn init
+npx shadxn@latest init
 
 # Add a component from a shadcn registry
-npx shadxn add button
+npx shadxn@latest add button
+# Or add a component using a schema url
+npx shadxn@latest add npx shadxn add "https://www.prismui.tech/r/styles/default/expandable-card.json"
+# Or add a v0 component
+npx shadxn@latest add "https://v0.dev/chat/b/b_ODuOFQMZViC"
+
 
 # Or create and use your custom registry
 # 1. Create your custom registry
-npx shadxn registry init
+npx shadxn@latest registry init
 # Start adding your custom components and declare them within the registry/registry.tsx file
 # 2. Build your custom registry
-npx shadxn registry build
+npx shadxn@latest registry build
 
 # 3. Run your local registry or deploy to Vercel
 pnpm run dev
 
 # 4. Activate your custom registry
-npx shadxn registry activate my-registry
+npx shadxn@latest registry activate my-registry
 
 # 5. Add a component from your custom registry
-npx shadxn add your-component -r my-registry
+npx shadxn@latest add your-component -r my-registry
 ```
 
 ## Documentation
 
-For more detailed information and documentation, visit [https://ui.shadcn.com/docs/cli](https://ui.shadcn.com/docs/cli).
+For more detailed information and documentation, visit [https://ui.shadxn.com/docs/cli](https://ui.shadcn.com/docs/cli).
 
 ## License
 

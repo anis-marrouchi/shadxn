@@ -3,6 +3,7 @@ import { Config } from "@/src/utils/get-config";
 import {
   registryBaseColorSchema,
   registryIndexSchema,
+  registryItemSchema,
   registryItemWithContentSchema,
   registryWithContentSchema,
   stylesSchema,
@@ -23,6 +24,29 @@ export function setBaseUrl(newBaseUrl: string) {
 export function getBaseUrl() {
   return baseUrl;
 }
+export function isUrl(path: string) {
+  try {
+    new URL(path)
+    return true
+  } catch (error) {
+    return false
+  }
+}
+
+export function getRegistryUrl(path: string) {
+  if (isUrl(path)) {
+    // If the url contains /chat/b/, we assume it's the v0 registry.
+    // We need to add the /json suffix if it's missing.
+    const url = new URL(path)
+    if (url.pathname.match(/\/chat\/b\//) && !url.pathname.endsWith("/json")) {
+      url.pathname = `${url.pathname}/json`
+    }
+
+    return url.toString()
+  }
+  return path
+}
+
 export async function getRegistryIndex() {
   try {
     const [result] = await fetchRegistry(["index.json"]);
@@ -115,7 +139,45 @@ export async function fetchTree(
 
     return registryWithContentSchema.parse(result);
   } catch (error) {
-        throw new Error(`Failed to fetch tree from registry.`);
+    throw new Error(`Failed to fetch tree from registry.`);
+  }
+}
+// For now, we fetch only one schema
+export async function fetchSchema(
+  url: string
+) {
+  url = getRegistryUrl(url);
+
+  try {
+    const response = await fetch(url, {
+      agent,
+    });
+    
+    let result: any = await response.json();
+    console.log(result);
+    // dirty backward compatibility fix
+    result.type = result.type.replace("registry:", "components:");
+    result.registryDependencies = result.files.flatMap((file: any) => {
+      // Extract all component names from the imports
+      const matches = file.content.matchAll(/from "@\/components\/ui\/([a-zA-Z_\-0-9]*)"/g);
+      const components = Array.from(matches, (match: any) => match[1]);
+      return components;
+    });
+    result.files = result.files.map((file: any) => {
+      return {
+        ...file,
+        name: file.name || file.path.split("/").pop().split(".").shift(),
+        dependencies: result.dependencies || [],
+        devDependencies: result.devDependencies || [],
+        path: file.path.split("/").pop(),
+      };
+    });
+
+    return registryWithContentSchema.parse([result]);
+
+  } catch (error) {
+    console.log(error);
+    throw new Error(`Failed to fetch schema from ${url}.`);
   }
 }
 

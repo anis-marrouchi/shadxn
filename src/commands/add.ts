@@ -12,6 +12,8 @@ import {
   resolveTree,
   setBaseUrl,
   getBaseUrl,
+  isUrl,
+  fetchSchema,
 } from "@/src/utils/registry";
 import { transform } from "@/src/utils/transformers";
 import chalk from "chalk";
@@ -117,6 +119,7 @@ export const add = new Command()
           setBaseUrl(registry);
         }
       }
+      
       const registryIndex = await getRegistryIndex();
       let selectedComponents = options.all
         ? registryIndex.map((entry) => entry.name)
@@ -171,13 +174,24 @@ export const add = new Command()
       }
 
       const tree = await resolveTree(registryIndex, selectedComponents);
-      const payload = await fetchTree(config.style, tree);
+      let payload: any = await fetchTree(config.style, tree);
       const baseColor = await getRegistryBaseColor(config.tailwind.baseColor);
 
-      if (!payload.length) {
-        logger.warn("Selected components not found. Exiting.");
-        process.exit(0);
-      }
+      
+        // Maybe its a schema url
+        if (isUrl(selectedComponents[0])) {
+          payload = await fetchSchema(selectedComponents[0]);
+          for (const component of payload) {
+              if (component.registryDependencies) {
+                await addRegistryDependencies(component.registryDependencies);
+              }
+          }
+        }
+
+        if (!payload.length) {
+          logger.warn("Selected components not found. Exiting.");
+          process.exit(0);
+        }
 
       if (!options.yes) {
         const { proceed } = await prompts({
@@ -262,36 +276,7 @@ export const add = new Command()
           await fs.writeFile(filePath, content);
         }
 
-        const packageManager = await getPackageManager(cwd);
-
-        // Install dependencies.
-        if (item.dependencies?.length) {
-          await execa(
-            packageManager,
-            [
-              packageManager === "npm" ? "install" : "add",
-              ...item.dependencies,
-            ],
-            {
-              cwd,
-            }
-          );
-        }
-
-        // Install devDependencies.
-        if (item.devDependencies?.length) {
-          await execa(
-            packageManager,
-            [
-              packageManager === "npm" ? "install" : "add",
-              "-D",
-              ...item.devDependencies,
-            ],
-            {
-              cwd,
-            }
-          );
-        }
+        await installComponentDependencies(cwd, item);
 
       }
       for (const item of payload) {
@@ -310,9 +295,10 @@ export const add = new Command()
           await fs.mkdir(targetDir, { recursive: true });
         }
 
-        const existingComponent = item.files.filter((file) =>
+        const existingComponent = item.files.filter((file: any) =>
           existsSync(path.resolve(targetDir, file.name))
         );
+
 
         if (existingComponent.length && !options.overwrite) {
           if (selectedComponents.includes(item.name)) {
@@ -362,41 +348,44 @@ export const add = new Command()
           await fs.writeFile(filePath, content);
         }
 
-        const packageManager = await getPackageManager(cwd);
-
-        // Install dependencies.
-        if (item.dependencies?.length) {
-          await execa(
-            packageManager,
-            [
-              packageManager === "npm" ? "install" : "add",
-              ...item.dependencies,
-            ],
-            {
-              cwd,
-            }
-          );
-        }
-
-        // Install devDependencies.
-        if (item.devDependencies?.length) {
-          await execa(
-            packageManager,
-            [
-              packageManager === "npm" ? "install" : "add",
-              "-D",
-              ...item.devDependencies,
-            ],
-            {
-              cwd,
-            }
-          );
-        }
+        await installComponentDependencies(cwd, item);
 
       }
       spinner.succeed(`Done.`);
     } catch (error) {
-      console.log(error);
       handleError(error);
     }
   });
+async function installComponentDependencies(cwd: string, item: any) {
+  const packageManager = await getPackageManager(cwd);
+
+  // Install dependencies.
+  if (item.dependencies?.length) {
+    await execa(
+      packageManager,
+      [
+        packageManager === "npm" ? "install" : "add",
+        ...item.dependencies,
+      ],
+      {
+        cwd,
+      }
+    );
+  }
+
+  // Install devDependencies.
+  if (item.devDependencies?.length) {
+    await execa(
+      packageManager,
+      [
+        packageManager === "npm" ? "install" : "add",
+        "-D",
+        ...item.devDependencies,
+      ],
+      {
+        cwd,
+      }
+    );
+  }
+}
+

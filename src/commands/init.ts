@@ -208,13 +208,17 @@ export async function promptForConfig(
         baseUrl: process.env.COMPONENTS_REGISTRY_URL ?? "https://ui.shadcn.com",
       },
       {
-        name: "shadxn",
-        baseUrl: "https://ui.shadxn.com"
+        name: "prismui",
+        baseUrl: "https://www.prismui.tech/r"
       },
       {
         name: "aceternity",
         baseUrl: "https://ui.aceternity.com"
-      }
+      },
+      {
+        name: "shadxn",
+        baseUrl: "https://ui.shadxn.com"
+      },
     ],
   })
 
