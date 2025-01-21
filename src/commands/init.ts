@@ -315,6 +315,14 @@ export async function promptForMinimalConfig(
         baseUrl: "https://ui.shadcn.com"
       },
       {
+        name: "prismui",
+        baseUrl: "https://www.prismui.tech/r"
+      },
+      {
+        name: "aceternity",
+        baseUrl: "https://ui.aceternity.com"
+      },
+      {
         name: "shadxn",
         baseUrl: "https://ui.shadxn.com"
       }

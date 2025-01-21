@@ -8,6 +8,7 @@ export const types = [
   'registry:page',
   'registry:blocks',
   'components:ui',
+  'components:hook',
   'components:component',
   'components:example',
   'components:page',

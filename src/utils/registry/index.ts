@@ -172,9 +172,12 @@ export async function fetchSchema(
       };
     });
 
+
     return registryWithContentSchema.parse([result]);
 
   } catch (error) {
+    console.error(error);
+    process.exit(1);
     throw new Error(`Failed to fetch schema from ${url}.`);
   }
 }

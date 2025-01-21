@@ -1,6 +1,6 @@
 {
   "name": "shadxn",
-  "version": "0.0.19",
+  "version": "0.0.20",
   "description": "Use one tool to add shadcn-ui, v0, prismui, aceternity-ui components and much more. Extend and add your own component registry.",
   "publishConfig": {
     "access": "public"
