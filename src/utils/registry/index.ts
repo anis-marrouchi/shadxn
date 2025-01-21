@@ -154,7 +154,6 @@ export async function fetchSchema(
     });
     
     let result: any = await response.json();
-    console.log(result);
     // dirty backward compatibility fix
     result.type = result.type.replace("registry:", "components:");
     result.registryDependencies = result.files.flatMap((file: any) => {
@@ -176,7 +175,6 @@ export async function fetchSchema(
     return registryWithContentSchema.parse([result]);
 
   } catch (error) {
-    console.log(error);
     throw new Error(`Failed to fetch schema from ${url}.`);
   }
 }
