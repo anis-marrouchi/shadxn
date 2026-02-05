@@ -1,7 +1,7 @@
 {
   "name": "shadxn",
-  "version": "0.0.20",
-  "description": "Use one tool to add shadcn-ui, v0, prismui, aceternity-ui components and much more. Extend and add your own component registry.",
+  "version": "0.1.0",
+  "description": "The agentic generation tool — generate components, pages, APIs, docs, skills, and more using AI. Default agent: Claude. Supports any tech stack.",
   "publishConfig": {
     "access": "public"
   },
@@ -30,14 +30,20 @@
     "src/registries"
   ],
   "keywords": [
+    "ai",
+    "agent",
+    "skills",
+    "generation",
+    "claude",
     "components",
     "ui",
     "tailwind",
-    "radix-ui",
     "shadcn",
-    "shadxn-ui",
-    "shadxn-cli",
-    "shadxn"
+    "shadxn",
+    "skills.sh",
+    "context7",
+    "code-generation",
+    "agentic"
   ],
   "type": "module",
   "exports": "./dist/index.js",

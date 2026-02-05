@@ -3,6 +3,13 @@ import { add } from "@/src/commands/add"
 import { diff } from "@/src/commands/diff"
 import { init } from "@/src/commands/init"
 import { registry } from "@/src/commands/registry"
+import { gen } from "@/src/commands/generate"
+import { skill } from "@/src/commands/skill"
+import { inspect } from "@/src/commands/inspect"
+import { evolve } from "@/src/commands/evolve"
+import { serve } from "@/src/commands/serve"
+import { create } from "@/src/commands/create"
+import { run } from "@/src/commands/run"
 import { Command } from "commander"
 
 import { getPackageInfo } from "./utils/get-package-info"
@@ -15,14 +22,27 @@ async function main() {
 
   const program = new Command()
     .name("shadxn")
-    .description("add components and dependencies to your project")
+    .description(
+      "the agentic generation tool — generate components, pages, APIs, docs, skills, and more using AI"
+    )
     .version(
       packageInfo.version || "1.0.0",
       "-v, --version",
       "display the version number"
     )
 
-  program.addCommand(init).addCommand(add).addCommand(diff).addCommand(registry)
+  program
+    .addCommand(gen)
+    .addCommand(evolve)
+    .addCommand(create)
+    .addCommand(run)
+    .addCommand(inspect)
+    .addCommand(skill)
+    .addCommand(serve)
+    .addCommand(init)
+    .addCommand(add)
+    .addCommand(diff)
+    .addCommand(registry)
 
   program.parse()
 }
