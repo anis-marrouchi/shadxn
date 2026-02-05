@@ -1,19 +1,24 @@
 
 # shadxn
 
-The agentic generation tool — generate components, pages, APIs, docs, skills, and more using AI. Default agent: Claude. Supports any tech stack.
+The intelligent AI framework — generate, evolve, and run anything. Learns from past, auto-heals, self-enhances. Default agent: Claude.
 
-`shadxn` started as an experimental CLI built on `shadcn-ui`. It has evolved into a universal agentic code generation tool that understands your project, loads skills, fetches live documentation, and generates production-ready output for **any** tech stack — not just React.
+`shadxn` started as a CLI built on `shadcn-ui`. It has evolved into an **intelligent runtime framework** — like Laravel, but powered by AI agents. It understands your project, generates production-ready output for any tech stack, learns from every interaction, automatically fixes errors, and enhances its own skills over time.
 
 ## What it does
 
-- **Generate anything** — components, pages, APIs, websites, documents, scripts, configs, agent skills, media prompts, reports
-- **Any tech stack** — detects 30+ languages and 25+ frameworks automatically (Next.js, Nuxt, SvelteKit, Django, Rails, FastAPI, Flutter, Go, Rust...)
-- **Claude as default agent** — uses Anthropic's Claude with tool use to generate files and ask clarifying questions when needed
-- **Schema-aware** — reads your Prisma schemas, GraphQL specs, OpenAPI definitions, tRPC routers, env files, and model types
-- **Context7 integration** — fetches up-to-date library documentation so generated code uses current APIs, not stale patterns
-- **skills.sh compatible** — install community skills or create your own. Skills are reusable SKILL.md files that teach the agent domain-specific patterns
-- **Backwards compatible** — all original commands (`init`, `add`, `diff`, `registry`) still work for component registry management
+- **Generate anything** — components, pages, APIs, websites, documents, tests, workflows, schemas, emails, diagrams, and more
+- **Evolve existing code** — transform files with AI, with diff preview and accept/skip controls
+- **Run as a framework** — HTTP server with request/response pipeline, like Express or Laravel
+- **Learn from past** — persistent memory records what worked, what failed, and user preferences
+- **Auto-heal** — detects build/test/lint failures, generates fixes, re-verifies automatically
+- **Self-enhance** — distills successful patterns into reusable skills without human intervention
+- **Any tech stack** — detects 30+ languages and 25+ frameworks (Next.js, Django, Rails, Flutter, Go, Rust...)
+- **Schema-aware** — reads Prisma, GraphQL, OpenAPI, tRPC, env files, and model types
+- **Context7 integration** — fetches up-to-date library documentation
+- **skills.sh compatible** — install community skills or create your own
+- **MCP server mode** — expose as a tool for Claude Code, Cursor, Windsurf
+- **Template system** — scaffold projects from 8 curated templates
 
 ## Acknowledgment
 
@@ -75,6 +80,7 @@ Commands:
   generate [options] [task...]   generate anything using AI (aliases: gen, g)
   evolve [options] [task...]     modify existing code using AI (aliases: ev, transform)
   create [options] [name]        scaffold a new project from a template using AI
+  run [options]                  start the intelligent runtime framework
   inspect [options]              show what the agent knows about your project (aliases: info, ctx)
   skill                          manage agent skills — install, create, list, inspect
   serve [options]                run as MCP server for AI editors (Claude Code, Cursor, etc.)
@@ -192,6 +198,88 @@ shadxn inspect
 ```
 
 **Options:** `--json` (machine-readable output), `--verbose` (show full schema contents)
+
+### `shadxn run`
+
+Start the intelligent runtime framework — an HTTP server that receives requests, generates code, learns, auto-heals, and self-enhances.
+
+```bash
+# Start the runtime
+shadxn run
+
+# Custom port and provider
+shadxn run --port 8080 --provider claude --model claude-sonnet-4-20250514
+
+# With specific heal commands
+shadxn run --test-cmd "npm test" --build-cmd "npm run build"
+
+# Disable features
+shadxn run --no-memory --no-heal --no-enhance
+```
+
+**How it works — the pipeline:**
+
+```
+Request → Memory → Context → Generate → Heal → Record → Enhance → Response
+```
+
+Every request flows through a middleware pipeline (like Express/Laravel):
+
+1. **Memory** — loads relevant past interactions, failed patterns to avoid, learned preferences
+2. **Context** — detects tech stack, reads schemas, loads matching skills, fetches Context7 docs
+3. **Generate** — runs the multi-step agentic loop with Claude
+4. **Heal** — runs build/test/lint commands; if anything fails, auto-generates fixes and re-verifies
+5. **Record** — saves the result to memory for future learning
+6. **Enhance** — periodically distills successful patterns into auto-generated skills
+
+**API Endpoints:**
+
+| Endpoint | Description |
+|---|---|
+| `POST /generate` | Generate code/content (body: `{ task, type?, outputDir? }`) |
+| `POST /evolve` | Transform existing code |
+| `GET /inspect` | Project analysis (tech stack, schemas, skills) |
+| `GET /memory` | View learning history, patterns, preferences |
+| `POST /feedback` | Rate a generation (body: `{ entryId, feedback }`) |
+| `POST /enhance` | Trigger self-enhancement manually |
+| `GET /health` | Health check with stats |
+
+**Example:**
+
+```bash
+# Generate via API
+curl -X POST http://localhost:3170/generate \
+  -H "Content-Type: application/json" \
+  -d '{"task": "a responsive pricing card with monthly/yearly toggle"}'
+
+# Check what the runtime has learned
+curl http://localhost:3170/memory
+
+# Give feedback so it learns
+curl -X POST http://localhost:3170/feedback \
+  -H "Content-Type: application/json" \
+  -d '{"entryId": "abc123", "feedback": "positive"}'
+```
+
+**Configuration (`shadxn.config.json`):**
+
+```json
+{
+  "port": 3170,
+  "provider": "claude",
+  "model": "claude-sonnet-4-20250514",
+  "memory": { "enabled": true },
+  "heal": {
+    "enabled": true,
+    "testCommand": "npm test",
+    "buildCommand": "npm run build"
+  },
+  "enhance": {
+    "enabled": true,
+    "autoSkills": true
+  }
+}
+```
 
 ### `shadxn create`
 
@@ -407,6 +495,13 @@ src/
 │   └── outputs/
 │       ├── types.ts             # Output type definitions + auto-detection
 │       └── handlers.ts          # File writing with project-aware paths
+├── runtime/
+│   ├── index.ts                 # Runtime exports
+│   ├── memory.ts                # Persistent memory/learning system
+│   ├── heal.ts                  # Auto-heal engine (detect, fix, verify)
+│   ├── enhance.ts               # Self-enhancement (auto-create skills)
+│   ├── pipeline.ts              # Middleware pipeline (like Express/Laravel)
+│   └── server.ts                # HTTP runtime server
 ├── mcp/
 │   └── index.ts                 # MCP server (stdio transport, JSON-RPC)
 ├── commands/
@@ -415,6 +510,7 @@ src/
 │   ├── create.ts                # `shadxn create` command (templates)
 │   ├── inspect.ts               # `shadxn inspect` command
 │   ├── skill.ts                 # `shadxn skill` command
+│   ├── run.ts                   # `shadxn run` command (runtime framework)
 │   ├── serve.ts                 # `shadxn serve` command (MCP)
 │   ├── init.ts                  # Legacy: project initialization
 │   ├── add.ts                   # Legacy: add components from registries
