@@ -74,8 +74,10 @@ Options:
 Commands:
   generate [options] [task...]   generate anything using AI (aliases: gen, g)
   evolve [options] [task...]     modify existing code using AI (aliases: ev, transform)
+  create [options] [name]        scaffold a new project from a template using AI
   inspect [options]              show what the agent knows about your project (aliases: info, ctx)
   skill                          manage agent skills — install, create, list, inspect
+  serve [options]                run as MCP server for AI editors (Claude Code, Cursor, etc.)
   init [options]                 initialize your project and install dependencies
   add [options] [components...]  add components from selected registries
   diff [options] [component]     check for component updates against the registry
@@ -190,6 +192,78 @@ shadxn inspect
 ```
 
 **Options:** `--json` (machine-readable output), `--verbose` (show full schema contents)
+
+### `shadxn create`
+
+Scaffold entire projects from curated templates using AI.
+
+```bash
+# List available templates
+shadxn create --list
+
+# Create from a template
+shadxn create my-app --template saas-starter
+shadxn create my-api --template api-service
+shadxn create my-cli --template cli-tool
+
+# Custom project (describe your own)
+shadxn create my-project
+# → Choose "Custom" and describe what you want
+```
+
+**Available templates:**
+
+| Template | Description |
+|---|---|
+| `saas-starter` | Full-stack SaaS with auth, billing (Stripe), dashboard, landing page |
+| `api-service` | REST API with auth, validation, error handling, tests |
+| `cli-tool` | CLI app with commands, prompts, config, colored output |
+| `component-library` | UI component library with Storybook, tests, docs |
+| `fullstack-app` | Full-stack app with database, API, UI, Docker, CI/CD |
+| `mobile-app` | Mobile app with navigation, screens, theming, auth |
+| `chrome-extension` | Browser extension (Manifest V3) with popup, content script, background |
+| `data-pipeline` | Data processing pipeline with ingestion, transformation, output |
+
+Templates use the multi-step agentic loop — the agent scaffolds foundations first, then builds each layer on top.
+
+### `shadxn serve`
+
+Run shadxn as an MCP (Model Context Protocol) server so AI editors can use it as a tool.
+
+```bash
+# Start MCP server (stdio transport)
+shadxn serve --stdio
+```
+
+**Add to Claude Code:**
+
+```bash
+claude mcp add shadxn -- npx shadxn serve --stdio
+```
+
+**Add to Cursor / MCP config:**
+
+```json
+{
+  "mcpServers": {
+    "shadxn": {
+      "command": "npx",
+      "args": ["shadxn", "serve", "--stdio"]
+    }
+  }
+}
+```
+
+**Exposed MCP tools:**
+
+| Tool | Description |
+|---|---|
+| `shadxn_generate` | Generate code, components, APIs, docs — with full project context |
+| `shadxn_inspect` | Analyze project tech stack, schemas, skills |
+| `shadxn_skill_match` | Find relevant skills for a task |
+| `shadxn_detect_output_type` | Auto-detect output type from description |
+
+This turns any MCP-compatible editor into a shadxn-powered generator.
 
 ### `shadxn skill`
 
@@ -333,9 +407,15 @@ src/
 │   └── outputs/
 │       ├── types.ts             # Output type definitions + auto-detection
 │       └── handlers.ts          # File writing with project-aware paths
+├── mcp/
+│   └── index.ts                 # MCP server (stdio transport, JSON-RPC)
 ├── commands/
 │   ├── generate.ts              # `shadxn generate` command
+│   ├── evolve.ts                # `shadxn evolve` command
+│   ├── create.ts                # `shadxn create` command (templates)
+│   ├── inspect.ts               # `shadxn inspect` command
 │   ├── skill.ts                 # `shadxn skill` command
+│   ├── serve.ts                 # `shadxn serve` command (MCP)
 │   ├── init.ts                  # Legacy: project initialization
 │   ├── add.ts                   # Legacy: add components from registries
 │   ├── diff.ts                  # Legacy: check for updates

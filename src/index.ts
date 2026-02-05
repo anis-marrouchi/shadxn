@@ -7,6 +7,8 @@ import { gen } from "@/src/commands/generate"
 import { skill } from "@/src/commands/skill"
 import { inspect } from "@/src/commands/inspect"
 import { evolve } from "@/src/commands/evolve"
+import { serve } from "@/src/commands/serve"
+import { create } from "@/src/commands/create"
 import { Command } from "commander"
 
 import { getPackageInfo } from "./utils/get-package-info"
@@ -31,8 +33,10 @@ async function main() {
   program
     .addCommand(gen)
     .addCommand(evolve)
+    .addCommand(create)
     .addCommand(inspect)
     .addCommand(skill)
+    .addCommand(serve)
     .addCommand(init)
     .addCommand(add)
     .addCommand(diff)
