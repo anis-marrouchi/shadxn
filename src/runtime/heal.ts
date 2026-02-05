@@ -33,7 +33,7 @@ export interface HealResult {
 const DEFAULT_HEAL_CONFIG: HealConfig = {
   enabled: true,
   maxAttempts: 3,
-  provider: "claude",
+  provider: "claude-code",
 }
 
 export class HealEngine {

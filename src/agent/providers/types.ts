@@ -43,7 +43,7 @@ export interface AgentProvider {
 // --- Agent configuration ---
 
 export const agentConfigSchema = z.object({
-  provider: z.enum(["claude", "openai", "ollama", "custom"]).default("claude"),
+  provider: z.enum(["claude-code", "claude", "openai", "ollama", "custom"]).default("claude-code"),
   model: z.string().optional(),
   apiKey: z.string().optional(),
   skills: z.array(z.string()).default([]),

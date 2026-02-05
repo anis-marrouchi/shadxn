@@ -83,7 +83,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     cwd,
     overwrite = false,
     dryRun = false,
-    provider: providerName = "claude",
+    provider: providerName = "claude-code",
     model,
     apiKey,
     context7 = true,

@@ -114,8 +114,8 @@ skill
   .option("--tags <tags>", "comma-separated tags")
   .option(
     "-p, --provider <provider>",
-    "AI provider for generation",
-    "claude"
+    "AI provider for generation (claude-code, claude)",
+    "claude-code"
   )
   .option("-m, --model <model>", "model to use")
   .option("--api-key <key>", "API key")
