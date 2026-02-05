@@ -1,72 +1,70 @@
 
 # shadxn
-[Getting Started](https://medium.com/@anis.marrouchi/revolutionizing-component-management-with-shadxn-73569fdfd0d6)
 
-`shadxn` is an experimental CLI tool that builds upon the foundation of the `shadcn-ui` CLI. It is designed to enhance your development workflow by allowing the integration of components and dependencies into your project. This tool introduces the flexibility of selecting component registries, enabling developers to add custom registries for personalized or public sharing of components. We extend our deepest gratitude to the `shadcn-ui` project and its contributors for their foundational work that made `shadxn` possible.
+The agentic generation tool — generate components, pages, APIs, docs, skills, and more using AI. Default agent: Claude. Supports any tech stack.
 
-## Acknowledgment 
-This project builds on top of the original `Shadcn UI` CLI. We are deeply grateful to `Shadcn` and all contributors to the `Shadcn UI` project for their pioneering work and for laying the groundwork that `shadxn` now builds upon.
- -  **Project:** Shadcn UI
- -  **Author:** [Shadcn](https://twitter.com/shadcn) 
- -  **License:** MIT 
- -  **Source:** [https://github.com/shadcn/ui](https://github.com/shadcn-ui/ui)
+`shadxn` started as an experimental CLI built on `shadcn-ui`. It has evolved into a universal agentic code generation tool that understands your project, loads skills, fetches live documentation, and generates production-ready output for **any** tech stack — not just React.
 
-## Features
+## What it does
 
-- **Custom Registry Support:** Initialize and manage custom registries to declare your own components.
-- **Enhanced `add` Command:** Add components from a selected registry, allowing for greater flexibility and customization.
-- **Project Initialization:** Initialize your project with default registries in `components.js`, preparing it for immediate development.
-- **Compatibility:** Extendable to various frameworks and libraries, `shadxn` is designed to fit into any development ecosystem.
+- **Generate anything** — components, pages, APIs, websites, documents, scripts, configs, agent skills, media prompts, reports
+- **Any tech stack** — detects 30+ languages and 25+ frameworks automatically (Next.js, Nuxt, SvelteKit, Django, Rails, FastAPI, Flutter, Go, Rust...)
+- **Claude as default agent** — uses Anthropic's Claude with tool use to generate files and ask clarifying questions when needed
+- **Schema-aware** — reads your Prisma schemas, GraphQL specs, OpenAPI definitions, tRPC routers, env files, and model types
+- **Context7 integration** — fetches up-to-date library documentation so generated code uses current APIs, not stale patterns
+- **skills.sh compatible** — install community skills or create your own. Skills are reusable SKILL.md files that teach the agent domain-specific patterns
+- **Backwards compatible** — all original commands (`init`, `add`, `diff`, `registry`) still work for component registry management
+
+## Acknowledgment
+
+This project builds on the original `Shadcn UI` CLI. We are deeply grateful to `Shadcn` and all contributors for their foundational work.
+
+- **Project:** Shadcn UI
+- **Author:** [Shadcn](https://twitter.com/shadcn)
+- **License:** MIT
+- **Source:** [https://github.com/shadcn-ui/ui](https://github.com/shadcn-ui/ui)
 
 ## Installation
 
-`shadxn` can be installed using various package managers or run directly with `npx` for immediate usage without global installation. Choose the method that best fits your workflow:
-
-### Using npm
-
 ```bash
+# npm
 npm install -g shadxn
-```
 
-This command installs `shadxn` globally on your machine, making it accessible from anywhere in your terminal.
-
-### Using Yarn
-
-```bash
-yarn global add shadxn
-```
-
-Yarn users can also install `shadxn` globally, ensuring it's available from any terminal session.
-
-### Using pnpm
-
-```bash
+# pnpm
 pnpm add -g shadxn
-```
 
-For those preferring `pnpm` for its efficient handling of node modules, this command will globally install `shadxn`.
+# yarn
+yarn global add shadxn
 
-### Using Bun
-
-```bash
+# bun
 bun add -g shadxn
-```
 
-If you're using `Bun`, a modern JavaScript runtime, this command will globally install `shadxn` on your system.
-
-### Using npx (No Installation Required)
-
-For a quick, one-time use, you can run `shadxn` directly with `npx` without needing to install it globally:
-
-```bash
+# or run directly with npx
 npx shadxn [command]
 ```
 
-This method is particularly useful for running the latest version of `shadxn` without affecting your global package setup.
-
-## Usage
+## Quick start
 
 ```bash
+# Generate a component
+npx shadxn generate "a responsive pricing card with toggle for monthly/yearly"
+
+# Generate an API endpoint
+npx shadxn gen "REST API for user authentication with JWT" --type api
+
+# Generate a full page
+npx shadxn g "admin dashboard with charts and data table" --type page
+
+# Generate a document
+npx shadxn generate "OpenAPI specification for a todo app" --type document
+
+# Generate a skill
+npx shadxn generate "how to create accessible form components" --type skill
+```
+
+## Commands
+
+```
 Usage: shadxn [options] [command]
 
 Options:
@@ -74,64 +72,221 @@ Options:
   -h, --help                     display help for command
 
 Commands:
-  init [options]                 initialize your project and install dependencies, adds default registries
-  add [options] [components...]  add components to your project from selected registries
+  generate [options] [task...]   generate anything using AI (aliases: gen, g)
+  skill                          manage agent skills — install, create, list, inspect
+  init [options]                 initialize your project and install dependencies
+  add [options] [components...]  add components from selected registries
   diff [options] [component]     check for component updates against the registry
   registry <action> [project]    manage the project's component registry
   help [command]                 display help for command
 ```
 
-### Commands in Detail
+### `shadxn generate`
 
-- **init:** Sets up your project with essential dependencies and a default registry in `components.js` for components management.
-- **add:** Enhances the original `add` command to allow selection of a registry for component retrieval, streamlining the addition of components to your project.
-- **registry:** A new command to initialize and manage custom registries, supporting actions like `init` for registry setup and `build` for registry deployment.
-
-### Examples
+The core command. Describe what you want and the agent builds it.
 
 ```bash
-# Initialize your project
-npx shadxn@latest init
-
-# Add a component from a shadcn registry
-npx shadxn@latest add button
-# Or add a component using a schema url
-npx shadxn@latest add npx shadxn add "https://www.prismui.tech/r/styles/default/expandable-card.json"
-# Or add a v0 component
-npx shadxn@latest add "https://v0.dev/chat/b/b_ODuOFQMZViC"
-
-
-# Or create and use your custom registry
-# 1. Create your custom registry
-npx shadxn@latest registry init
-# Start adding your custom components and declare them within the registry/registry.tsx file
-# 2. Build your custom registry
-npx shadxn@latest registry build
-
-# 3. Run your local registry or deploy to Vercel
-pnpm run dev
-
-# 4. Activate your custom registry
-npx shadxn@latest registry activate my-registry
-
-# 5. Add a component from your custom registry
-npx shadxn@latest add your-component -r my-registry
+shadxn generate "a dashboard with user stats and charts"
 ```
 
-## Documentation
+**Options:**
 
-For more detailed information and documentation, visit [https://ui.shadxn.com/docs/cli](https://ui.shadcn.com/docs/cli).
+| Flag | Description |
+|---|---|
+| `-t, --type <type>` | Output type: `component`, `page`, `api`, `website`, `document`, `script`, `config`, `skill`, `media`, `report`, `auto` |
+| `-o, --output <dir>` | Output directory |
+| `--overwrite` | Overwrite existing files |
+| `--dry-run` | Preview without writing files |
+| `-p, --provider <name>` | AI provider (`claude`, `openai`, `ollama`) |
+| `-m, --model <model>` | Model to use |
+| `--api-key <key>` | API key for the provider |
+| `-c, --cwd <cwd>` | Working directory |
+| `--no-context7` | Disable Context7 doc lookup |
+| `-y, --yes` | Skip confirmation prompts |
+
+**How it works:**
+
+1. Detects your tech stack (languages, frameworks, databases, styling, testing, deployment)
+2. Reads project schemas (Prisma, GraphQL, OpenAPI, tRPC, env vars, model files)
+3. Loads matching skills from `.skills/` directory
+4. Fetches relevant library documentation via Context7
+5. Sends everything to Claude with your task description
+6. Claude generates files using `create_files` tool, or asks clarifying questions via `ask_user`
+7. Files are written to the appropriate directory based on output type and project structure
+
+### `shadxn skill`
+
+Manage agent skills — reusable instruction sets that teach the agent domain-specific patterns.
+
+```bash
+# Install a skill package from skills.sh or GitHub
+shadxn skill install intellectronica/agent-skills
+
+# Create a new skill (AI-generated based on your tech stack)
+shadxn skill create form-validation
+
+# Create a blank skill template
+shadxn skill create my-skill --no-ai
+
+# List installed skills
+shadxn skill list
+
+# View skill details
+shadxn skill inspect form-validation
+```
+
+Skills are SKILL.md files with YAML frontmatter, following the [Agent Skills](https://skills.sh) specification:
+
+```markdown
+---
+name: form-validation
+description: Generate accessible form components with validation
+tags:
+  - forms
+  - validation
+  - accessibility
+---
+
+# Form Validation Skill
+
+## Instructions
+
+When creating form components:
+1. Use the project's form library (react-hook-form, formik, etc.)
+2. Add Zod schemas for validation
+3. Include proper ARIA attributes
+4. Show inline error messages
+...
+```
+
+Skills are automatically matched to tasks based on triggers, tags, and content overlap.
+
+### Legacy commands
+
+These original commands continue to work for component registry management:
+
+```bash
+# Initialize project for component registries
+npx shadxn init
+
+# Add a component from a registry
+npx shadxn add button
+
+# Add from a schema URL
+npx shadxn add "https://www.prismui.tech/r/styles/default/expandable-card.json"
+
+# Add a v0 component
+npx shadxn add "https://v0.dev/chat/b/b_ODuOFQMZViC"
+
+# Manage custom registries
+npx shadxn registry init
+npx shadxn registry build
+npx shadxn registry activate my-registry
+```
+
+## Configuration
+
+### API key
+
+Set your Anthropic API key:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Or pass it inline:
+
+```bash
+shadxn generate "..." --api-key sk-ant-...
+```
+
+### Project detection
+
+shadxn automatically detects your project's:
+
+- **Languages** — TypeScript, Python, Rust, Go, Ruby, PHP, Java, Kotlin, Swift, Dart, Elixir, C/C++, and more
+- **Frameworks** — Next.js, Nuxt, SvelteKit, Astro, Remix, Angular, Vue, Express, Fastify, Hono, Django, Rails, Laravel, FastAPI, Flutter, Expo, Electron, Tauri...
+- **Databases** — Prisma, Drizzle, TypeORM, Knex, Supabase, Firebase
+- **Styling** — Tailwind CSS, PostCSS, Stylelint, styled-components
+- **Testing** — Vitest, Jest, Cypress, Playwright, Mocha, pytest
+- **Deployment** — Vercel, Netlify, Docker, Fly.io, Railway, GitHub Actions, Terraform
+- **Package managers** — npm, pnpm, yarn, bun
+- **Monorepos** — Turborepo, Nx, Lerna, pnpm workspaces
+
+### Output types
+
+| Type | Description |
+|---|---|
+| `component` | UI component (any framework) |
+| `page` | Full page or screen |
+| `api` | API endpoint, route handler, or service |
+| `website` | Multi-page website or app |
+| `document` | Markdown, documentation, or specification |
+| `script` | Standalone script or utility |
+| `config` | Configuration file or setup |
+| `skill` | Agent skill (SKILL.md format) |
+| `media` | Media generation prompt (image/audio/video description) |
+| `report` | Analysis report or audit |
+| `auto` | Auto-detect from task description (default) |
+
+## Architecture
+
+```
+src/
+├── agent/
+│   ├── index.ts                 # Orchestrator — coordinates the full pipeline
+│   ├── providers/
+│   │   ├── types.ts             # Provider abstraction + config schema
+│   │   ├── claude.ts            # Claude provider (default)
+│   │   └── index.ts             # Provider factory
+│   ├── context/
+│   │   ├── tech-stack.ts        # Universal tech stack detection
+│   │   ├── schema.ts            # Schema awareness (DB, API, env, models)
+│   │   └── context7.ts          # Context7 live documentation
+│   ├── skills/
+│   │   ├── types.ts             # Skill schema (skills.sh compatible)
+│   │   ├── loader.ts            # Load + match skills to tasks
+│   │   ├── registry.ts          # skills.sh install + GitHub fallback
+│   │   └── generator.ts         # AI-powered skill creation
+│   └── outputs/
+│       ├── types.ts             # Output type definitions + auto-detection
+│       └── handlers.ts          # File writing with project-aware paths
+├── commands/
+│   ├── generate.ts              # `shadxn generate` command
+│   ├── skill.ts                 # `shadxn skill` command
+│   ├── init.ts                  # Legacy: project initialization
+│   ├── add.ts                   # Legacy: add components from registries
+│   ├── diff.ts                  # Legacy: check for updates
+│   └── registry.ts              # Legacy: manage registries
+├── registries/                  # Component registry definitions
+└── utils/                       # Shared utilities
+```
+
+## Extending
+
+### Adding a provider
+
+Implement the `AgentProvider` interface in `src/agent/providers/`:
+
+```typescript
+interface AgentProvider {
+  name: string
+  generate(messages: GenerationMessage[], options?: ProviderOptions): Promise<GenerationResult>
+}
+```
+
+### Creating skills
+
+Skills are the composable building blocks. Create them manually or let the AI generate them:
+
+```bash
+# AI generates a skill based on your tech stack
+shadxn skill create api-patterns -d "RESTful API patterns with error handling"
+
+# Install community skills
+shadxn skill install owner/repo
+```
 
 ## License
 
 `shadxn` is licensed under the [MIT license](https://github.com/anis-marrouchi/shadxn/blob/main/LICENSE.md).
-
-## Objective and Current State
-
-The main objectives of `shadxn` are to:
-- Allow the addition of custom registries for tailored component management.
-- Provide an unopinionated tool that integrates into any workflow without restriction.
-- Enable the creation of custom registries for either internal use or public sharing.
-- Extend its utility across different frameworks and libraries, promoting versatility in development environments.
-
-As an experimental project, `shadxn` is in active development, and contributions, feedback, and suggestions are welcome to enhance its capabilities and reach.
