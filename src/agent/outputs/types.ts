@@ -70,6 +70,36 @@ export const OUTPUT_CONFIGS: Record<string, OutputConfig> = {
     filePatterns: ["*.md", "*.html", "*.json"],
     description: "Analysis report",
   },
+  test: {
+    type: "test",
+    baseDir: "src",
+    filePatterns: ["*.test.ts", "*.test.tsx", "*.spec.ts", "*.test.js", "*.test.py", "*.test.go"],
+    description: "Test suite or fixture",
+  },
+  workflow: {
+    type: "workflow",
+    baseDir: ".github/workflows",
+    filePatterns: ["*.yml", "*.yaml"],
+    description: "CI/CD pipeline or automation",
+  },
+  schema: {
+    type: "schema",
+    baseDir: "src",
+    filePatterns: ["*.ts", "*.prisma", "*.graphql", "*.gql", "*.py"],
+    description: "Database schema, validators, or types",
+  },
+  email: {
+    type: "email",
+    baseDir: "src/emails",
+    filePatterns: ["*.tsx", "*.jsx", "*.html", "*.mjml"],
+    description: "Email template",
+  },
+  diagram: {
+    type: "diagram",
+    baseDir: "docs",
+    filePatterns: ["*.md", "*.mmd", "*.d2", "*.puml"],
+    description: "Architecture or data diagram",
+  },
 }
 
 export function resolveOutputType(
@@ -94,6 +124,11 @@ export function resolveOutputType(
     [/\b(skill|agent skill|skill\.md)\b/i, "skill"],
     [/\b(video|audio|image|media|animation|thumbnail|podcast)\b/i, "media"],
     [/\b(report|audit|analysis|review|assessment|benchmark)\b/i, "report"],
+    [/\b(test|spec|unit test|integration test|e2e|coverage|fixture|mock)\b/i, "test"],
+    [/\b(workflow|ci|cd|pipeline|github action|deploy|automation|ci\/cd)\b/i, "workflow"],
+    [/\b(schema|model|migration|prisma|drizzle|zod|validator|graphql type)\b/i, "schema"],
+    [/\b(email|newsletter|transactional|invite|welcome email|notification email)\b/i, "email"],
+    [/\b(diagram|erd|flowchart|architecture diagram|sequence diagram|mermaid|plantuml|d2)\b/i, "diagram"],
   ]
 
   for (const [pattern, type] of patterns) {

@@ -73,6 +73,8 @@ Options:
 
 Commands:
   generate [options] [task...]   generate anything using AI (aliases: gen, g)
+  evolve [options] [task...]     modify existing code using AI (aliases: ev, transform)
+  inspect [options]              show what the agent knows about your project (aliases: info, ctx)
   skill                          manage agent skills — install, create, list, inspect
   init [options]                 initialize your project and install dependencies
   add [options] [components...]  add components from selected registries
@@ -93,26 +95,101 @@ shadxn generate "a dashboard with user stats and charts"
 
 | Flag | Description |
 |---|---|
-| `-t, --type <type>` | Output type: `component`, `page`, `api`, `website`, `document`, `script`, `config`, `skill`, `media`, `report`, `auto` |
+| `-t, --type <type>` | Output type: `component`, `page`, `api`, `website`, `document`, `script`, `config`, `skill`, `media`, `report`, `test`, `workflow`, `schema`, `email`, `diagram`, `auto` |
 | `-o, --output <dir>` | Output directory |
 | `--overwrite` | Overwrite existing files |
 | `--dry-run` | Preview without writing files |
 | `-p, --provider <name>` | AI provider (`claude`, `openai`, `ollama`) |
 | `-m, --model <model>` | Model to use |
 | `--api-key <key>` | API key for the provider |
+| `--max-steps <n>` | Max agentic loop steps for complex generation (default: 5) |
 | `-c, --cwd <cwd>` | Working directory |
 | `--no-context7` | Disable Context7 doc lookup |
 | `-y, --yes` | Skip confirmation prompts |
 
-**How it works:**
+**How it works (multi-step agentic loop):**
 
 1. Detects your tech stack (languages, frameworks, databases, styling, testing, deployment)
 2. Reads project schemas (Prisma, GraphQL, OpenAPI, tRPC, env vars, model files)
 3. Loads matching skills from `.skills/` directory
 4. Fetches relevant library documentation via Context7
 5. Sends everything to Claude with your task description
-6. Claude generates files using `create_files` tool, or asks clarifying questions via `ask_user`
-7. Files are written to the appropriate directory based on output type and project structure
+6. **Agentic loop**: Claude generates files, then evaluates if more are needed. For complex tasks (e.g., "full-stack todo app"), it chains steps — schema first, then API referencing the schema, then UI calling the API, then tests covering everything
+7. Files are deduplicated and written to the appropriate directory based on output type and project structure
+
+### `shadxn evolve`
+
+Modify existing code using AI. Unlike `generate` (which creates new files), `evolve` reads your existing files, transforms them, and shows a diff preview before writing.
+
+```bash
+# Add dark mode to all components
+shadxn evolve "add dark mode support" --glob "src/components/**/*.tsx"
+
+# Convert REST calls to tRPC
+shadxn evolve "migrate API calls to tRPC" --glob "src/app/**"
+
+# Add accessibility
+shadxn evolve "add ARIA attributes and keyboard navigation" --glob "src/components/forms/**"
+
+# Internationalize
+shadxn evolve "add i18n with next-intl, extract hardcoded strings" --glob "src/**/*.tsx"
+```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `-g, --glob <pattern>` | Glob pattern for files to evolve |
+| `--max-files <n>` | Max files to process (default: 10) |
+| `-p, --provider <name>` | AI provider |
+| `-m, --model <model>` | Model to use |
+| `--api-key <key>` | API key |
+| `-c, --cwd <cwd>` | Working directory |
+| `--no-context7` | Disable Context7 |
+| `-y, --yes` | Apply all changes without confirmation |
+| `--dry-run` | Show proposed changes without writing |
+
+Each changed file shows a colored diff preview with accept/skip/quit controls.
+
+### `shadxn inspect`
+
+Show what the agent knows about your project — before generating anything.
+
+```bash
+shadxn inspect
+```
+
+```
+  shadxn inspect
+  /path/to/your/project
+
+  Languages
+    ● typescript (tsconfig.json)
+
+  Frameworks
+    ● nextjs [fullstack]
+    ● react @^18.2.0 [frontend]
+
+  Databases
+    ● prisma (5 tables: User, Post, Comment, Tag, Session)
+
+  Styling
+    ● tailwindcss
+
+  Testing
+    ● vitest
+
+  Skills
+    ● form-validation [local]
+    ● api-patterns [intellectronica/agent-skills]
+
+  Dependencies
+    ● 42 dependencies, 15 devDependencies
+
+  Summary: 1 lang(s) · 2 framework(s) · schemas detected · 2 skill(s)
+```
+
+**Options:** `--json` (machine-readable output), `--verbose` (show full schema contents)
 
 ### `shadxn skill`
 
@@ -227,6 +304,11 @@ shadxn automatically detects your project's:
 | `skill` | Agent skill (SKILL.md format) |
 | `media` | Media generation prompt (image/audio/video description) |
 | `report` | Analysis report or audit |
+| `test` | Test suite, test fixtures, or test data |
+| `workflow` | CI/CD pipeline, GitHub Actions, or automation |
+| `schema` | Database schema, Zod validators, or GraphQL types |
+| `email` | Email template (React Email, MJML, HTML) |
+| `diagram` | Mermaid, D2, or PlantUML diagram |
 | `auto` | Auto-detect from task description (default) |
 
 ## Architecture

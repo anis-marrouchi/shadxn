@@ -95,5 +95,27 @@ export function resolveOutputDir(
     }
   }
 
+  if (outputType === "test") {
+    if (stack.testing.includes("vitest") || stack.testing.includes("jest")) {
+      baseDir = stack.srcDir || "src"
+    }
+  }
+
+  if (outputType === "workflow") {
+    baseDir = ".github/workflows"
+  }
+
+  if (outputType === "schema") {
+    if (stack.databases.includes("prisma")) {
+      baseDir = "prisma"
+    } else if (stack.srcDir) {
+      baseDir = `${stack.srcDir}/schemas`
+    }
+  }
+
+  if (outputType === "email") {
+    baseDir = stack.srcDir ? `${stack.srcDir}/emails` : "emails"
+  }
+
   return baseDir
 }

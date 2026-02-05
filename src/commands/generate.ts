@@ -50,6 +50,11 @@ export const gen = new Command()
     process.cwd()
   )
   .option("--no-context7", "disable Context7 documentation lookup")
+  .option(
+    "--max-steps <n>",
+    "max agentic loop steps for complex generation (default: 5)",
+    "5"
+  )
   .option("-y, --yes", "skip confirmation prompts", false)
   .action(async (taskParts, opts) => {
     try {
@@ -131,6 +136,7 @@ export const gen = new Command()
         cwd,
         context7: !options.noContext7,
         interactive: !options.yes,
+        maxSteps: parseInt(opts.maxSteps || "5", 10),
       })
 
       spinner.stop()

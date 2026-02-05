@@ -75,6 +75,11 @@ export const OUTPUT_TYPES = [
   "skill",
   "media",
   "report",
+  "test",
+  "workflow",
+  "schema",
+  "email",
+  "diagram",
   "auto",
 ] as const
 
@@ -91,5 +96,10 @@ export const outputTypeDescriptions: Record<OutputType, string> = {
   skill: "Agent skill (SKILL.md format for skills.sh)",
   media: "Media generation prompt (image/audio/video description)",
   report: "Analysis report or audit",
+  test: "Test suite, test fixtures, or test data",
+  workflow: "CI/CD pipeline, GitHub Actions, or automation",
+  schema: "Database schema, Zod validators, or GraphQL types",
+  email: "Email template (React Email, MJML, HTML)",
+  diagram: "Mermaid, D2, or PlantUML diagram",
   auto: "Auto-detect the best output type",
 }

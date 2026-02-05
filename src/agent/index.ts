@@ -33,6 +33,7 @@ export interface GenerateOptions {
   context7?: boolean
   interactive?: boolean
   skills?: string[] // Additional skill packages to load
+  maxSteps?: number // Max agentic loop iterations (default 5)
 }
 
 export interface GenerateResult {
@@ -87,6 +88,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     apiKey,
     context7 = true,
     interactive = true,
+    maxSteps = 5,
   } = options
 
   // 1. Gather context
@@ -111,7 +113,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
   // 4. Build system prompt
   const systemPrompt = buildSystemPrompt(context, outputType, matchedSkills.map((m) => m.skill))
 
-  // 5. Create provider and generate
+  // 5. Create provider and run multi-step agent loop
   const provider = createProvider(providerName, apiKey)
 
   const messages: GenerationMessage[] = [
@@ -120,23 +122,103 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
   ]
 
   logger.info("Generating...")
-  let result = await provider.generate(messages, { model, maxTokens: 8192 })
+
+  const allFiles: import("./providers/types").GeneratedFile[] = []
+  let totalTokens = 0
+  let content = ""
+  let followUp: string | undefined
+  let step = 0
+
+  // --- Multi-step agent loop ---
+  // The agent can chain multiple generation steps. Each step's output
+  // becomes context for the next, enabling complex multi-file generation
+  // where later files depend on earlier ones (e.g., schema → API → UI → tests).
+  while (step < maxSteps) {
+    step++
+    if (step > 1) {
+      logger.info(`Step ${step}/${maxSteps}...`)
+    }
+
+    const result = await provider.generate(messages, {
+      model,
+      maxTokens: 8192,
+    })
+
+    totalTokens += result.tokensUsed || 0
+    content = result.content
+
+    // Collect generated files
+    if (result.files.length) {
+      allFiles.push(...result.files)
+    }
+
+    // If the agent asks a follow-up, break and surface to user
+    if (result.followUp) {
+      followUp = result.followUp
+      break
+    }
+
+    // Check if the agent signaled completion (no tool use, or stop_reason is end_turn)
+    // If files were generated and there's no indication of more work, we're done
+    if (result.files.length === 0 && step > 1) {
+      // No more files to generate — agent is done
+      break
+    }
+
+    // For complex tasks, check if the agent wants to continue by looking for
+    // continuation signals in the response content
+    const wantsContinuation =
+      result.content.includes("[CONTINUE]") ||
+      result.content.includes("Next, I'll") ||
+      result.content.includes("Now let me") ||
+      result.content.includes("I'll also generate")
+
+    if (!wantsContinuation) {
+      break
+    }
+
+    // Feed back what was generated so the agent can build on it
+    const filesSummary = result.files
+      .map((f) => `Created: ${f.path}${f.description ? ` — ${f.description}` : ""}`)
+      .join("\n")
+
+    messages.push({
+      role: "assistant",
+      content: result.content + (filesSummary ? `\n\nFiles created:\n${filesSummary}` : ""),
+    })
+
+    messages.push({
+      role: "user",
+      content:
+        "Continue generating the remaining files. Build on what you've already created. When finished, do not include [CONTINUE] in your response.",
+    })
+  }
+
+  if (step > 1) {
+    logger.info(`Completed in ${step} step(s)`)
+  }
 
   // 6. Handle follow-up questions (interactive mode)
-  if (result.followUp && interactive) {
+  if (followUp && interactive) {
     return {
       files: { written: [], skipped: [], errors: [] },
-      content: result.content,
+      content,
       outputType,
-      followUp: result.followUp,
-      tokensUsed: result.tokensUsed,
+      followUp,
+      tokensUsed: totalTokens,
     }
   }
 
-  // 7. Write files
+  // 7. Deduplicate files (later versions override earlier ones)
+  const deduped = new Map<string, import("./providers/types").GeneratedFile>()
+  for (const file of allFiles) {
+    deduped.set(file.path, file)
+  }
+
+  // 8. Write files
   const outputDir = resolveOutputDir(outputType, context.techStack, options.outputDir)
 
-  const writeResult = await writeGeneratedFiles(result.files, {
+  const writeResult = await writeGeneratedFiles(Array.from(deduped.values()), {
     cwd,
     overwrite,
     dryRun,
@@ -145,9 +227,9 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
 
   return {
     files: writeResult,
-    content: result.content,
+    content,
     outputType,
-    tokensUsed: result.tokensUsed,
+    tokensUsed: totalTokens,
   }
 }
 
@@ -170,7 +252,15 @@ IMPORTANT RULES:
 - Use the detected tech stack to choose the right language, framework, and patterns
 - File paths should be relative to the project root
 - Include all necessary imports
-- Do NOT add unnecessary dependencies`)
+- Do NOT add unnecessary dependencies
+
+MULTI-STEP GENERATION:
+For complex tasks that require multiple related files (e.g., schema + API + UI + tests), you can chain steps:
+- Generate the foundational files first (schemas, types, configs)
+- Include "[CONTINUE]" in your response text when there are more files to generate
+- In subsequent steps, you'll see what was already created — build on it
+- When all files are generated, do NOT include "[CONTINUE]"
+- This enables you to generate a schema first, then an API that references it, then a UI that calls the API`)
 
   // Tech stack context
   sections.push(`# Project Tech Stack\n${formatTechStack(context.techStack)}`)

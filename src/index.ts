@@ -5,6 +5,8 @@ import { init } from "@/src/commands/init"
 import { registry } from "@/src/commands/registry"
 import { gen } from "@/src/commands/generate"
 import { skill } from "@/src/commands/skill"
+import { inspect } from "@/src/commands/inspect"
+import { evolve } from "@/src/commands/evolve"
 import { Command } from "commander"
 
 import { getPackageInfo } from "./utils/get-package-info"
@@ -28,6 +30,8 @@ async function main() {
 
   program
     .addCommand(gen)
+    .addCommand(evolve)
+    .addCommand(inspect)
     .addCommand(skill)
     .addCommand(init)
     .addCommand(add)
