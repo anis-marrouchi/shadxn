@@ -3,6 +3,7 @@ import path from "path"
 import { handleError } from "@/src/utils/handle-error"
 import { logger } from "@/src/utils/logger"
 import { createProvider, type ProviderName } from "@/src/agent/providers"
+import { ensureCredentials } from "@/src/commands/model"
 import { detectTechStack, formatTechStack } from "@/src/agent/context/tech-stack"
 import { loadLocalSkills } from "@/src/agent/skills/loader"
 import { installSkillPackage, generateSkillMd, listInstalledSkills } from "@/src/agent/skills/registry"
@@ -196,7 +197,13 @@ skill
           tags
         )
       } else {
-        // AI-generated skill
+        // AI-generated skill — ensure credentials first
+        const hasCredentials = await ensureCredentials(opts.apiKey)
+        if (!hasCredentials) {
+          logger.error("No credentials configured. Run `shadxn model` to set up.")
+          process.exit(1)
+        }
+
         const spinner = ora("Detecting tech stack...").start()
         const techStack = await detectTechStack(cwd)
         spinner.text = "Generating skill with AI..."

@@ -4,208 +4,530 @@ import type {
   GenerationResult,
   GeneratedFile,
   ProviderOptions,
+  StreamEvent,
 } from "./types"
-import { execSync } from "child_process"
+import { resolveToken, loadAuthConfig } from "@/src/utils/auth-store"
 import { execa } from "execa"
 
-// --- Claude Code provider: uses the `claude` CLI (works with your Claude subscription) ---
+// --- Claude Code provider: uses Claude CLI (subscription) or direct API (API key) ---
+
+const DEFAULT_MODEL = "claude-sonnet-4-20250514"
+const DEFAULT_MAX_TOKENS = 8192
+
+// Model ID → claude CLI alias
+const CLI_MODEL_ALIASES: Record<string, string> = {
+  "claude-sonnet-4-20250514": "sonnet",
+  "claude-opus-4-20250514": "opus",
+  "claude-haiku-4-20250514": "haiku",
+}
+
+type AuthCredential = { type: "oauth"; token: string } | { type: "api-key"; token: string }
+
+interface AnthropicContentBlock {
+  type: "text" | "tool_use" | "tool_result"
+  text?: string
+  id?: string
+  name?: string
+  input?: Record<string, unknown>
+}
+
+interface AnthropicResponse {
+  id: string
+  content: AnthropicContentBlock[]
+  model: string
+  stop_reason: string
+  usage: { input_tokens: number; output_tokens: number }
+}
+
+const TOOLS = [
+  {
+    name: "create_files",
+    description:
+      "Create one or more files as output. Use this when the user asks you to generate code, documents, configs, or any file-based output.",
+    input_schema: {
+      type: "object",
+      properties: {
+        files: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              path: {
+                type: "string",
+                description:
+                  "Relative file path from project root (e.g., src/components/Button.tsx)",
+              },
+              content: {
+                type: "string",
+                description: "The full content of the file",
+              },
+              language: {
+                type: "string",
+                description: "Programming language or file type",
+              },
+              description: {
+                type: "string",
+                description: "Brief description of what this file does",
+              },
+            },
+            required: ["path", "content"],
+          },
+        },
+        summary: {
+          type: "string",
+          description: "Brief summary of all generated files",
+        },
+      },
+      required: ["files"],
+    },
+  },
+  {
+    name: "ask_user",
+    description:
+      "Ask the user a clarifying question when you need more information to proceed.",
+    input_schema: {
+      type: "object",
+      properties: {
+        question: {
+          type: "string",
+          description: "The question to ask the user",
+        },
+        options: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional list of choices for the user",
+        },
+      },
+      required: ["question"],
+    },
+  },
+]
 
 export class ClaudeCodeProvider implements AgentProvider {
   name = "claude-code"
+  private credential: AuthCredential
 
   constructor() {
-    // Verify claude CLI is available
-    try {
-      execSync("claude --version", { stdio: "pipe" })
-    } catch {
+    // Stored config takes priority — if user ran `shadxn model` and chose OAuth,
+    // we use that regardless of ANTHROPIC_API_KEY env var (same as OpenClaw's clearEnv).
+    const stored = loadAuthConfig()
+    if (stored) {
+      this.credential = { type: stored.authType, token: stored.token }
+      return
+    }
+
+    const resolved = resolveToken()
+    if (!resolved) {
       throw new Error(
-        "Claude Code CLI not found. Install it with: npm install -g @anthropic-ai/claude-code\n" +
-          "Then authenticate with: claude login\n" +
-          "This uses your Claude subscription — no API key needed."
+        "No Claude credentials found.\n" +
+          "Options:\n" +
+          "  1. Run `shadxn model` to configure credentials\n" +
+          "  2. Set ANTHROPIC_API_KEY environment variable\n" +
+          "  3. Set ANTHROPIC_OAUTH_TOKEN environment variable"
       )
     }
+    this.credential = { type: resolved.authType, token: resolved.token }
   }
 
   async generate(
     messages: GenerationMessage[],
     options?: ProviderOptions
   ): Promise<GenerationResult> {
-    // Build the prompt from messages
-    const systemMsg = messages.find((m) => m.role === "system")
-    const userMsgs = messages.filter((m) => m.role !== "system")
+    // OAuth tokens → use claude CLI (subscription billing)
+    // API keys → call API directly
+    if (this.credential.type === "oauth") {
+      return this.generateViaCli(messages, options)
+    }
+    return this.generateViaApi(messages, options)
+  }
 
-    // Construct a single prompt that includes system context and conversation
-    const parts: string[] = []
+  /**
+   * Generate via the `claude` CLI binary.
+   * This is how subscription billing works — the CLI handles auth internally.
+   * Same approach as OpenClaw's claude-cli backend.
+   */
+  private async generateViaCli(
+    messages: GenerationMessage[],
+    options?: ProviderOptions
+  ): Promise<GenerationResult> {
+    const model = options?.model || loadAuthConfig()?.model || DEFAULT_MODEL
+    const cliModel = CLI_MODEL_ALIASES[model] || model
+
+    const systemMsg = messages.find((m) => m.role === "system")
+    const userMsgs = messages.filter((m) => m.role === "user")
+    const prompt = userMsgs.map((m) => m.content).join("\n\n")
+
+    const args = [
+      "-p",
+      "--output-format", "json",
+      "--model", cliModel,
+      "--dangerously-skip-permissions",
+    ]
 
     if (systemMsg) {
-      parts.push(systemMsg.content)
+      args.push("--append-system-prompt", systemMsg.content)
     }
 
-    // Add instruction to output structured JSON for file generation
-    parts.push(`
-CRITICAL OUTPUT FORMAT INSTRUCTION:
-You MUST respond with a valid JSON object and NOTHING else. No markdown fences, no explanation outside the JSON.
-The JSON must have this exact structure:
-{
-  "files": [
-    {
-      "path": "relative/path/to/file.ext",
-      "content": "full file content here",
-      "language": "typescript",
-      "description": "what this file does"
+    // Prompt goes as the last positional argument
+    args.push(prompt)
+
+    // Clear ANTHROPIC_API_KEY to force CLI to use subscription auth
+    const env = { ...process.env }
+    delete env.ANTHROPIC_API_KEY
+    delete env.ANTHROPIC_API_KEY_OLD
+
+    const result = await execa("claude", args, {
+      env,
+      extendEnv: false,
+      reject: false,
+      timeout: 300_000,
+      stdin: "ignore",
+    })
+
+    if (result.exitCode !== 0) {
+      const err = result.stderr || result.stdout || "Claude CLI failed"
+      throw new Error(`Claude CLI error: ${err}`)
     }
-  ],
-  "summary": "brief summary of what was generated",
-  "followUp": null
-}
 
-If you need to ask the user a clarifying question instead of generating files, respond with:
-{
-  "files": [],
-  "summary": "",
-  "followUp": "your question here"
-}
+    // Claude CLI may return success exit code but with is_error in JSON
+    const output = result.stdout.trim()
+    try {
+      const json = JSON.parse(output)
+      if (json.is_error && json.result) {
+        throw new Error(json.result)
+      }
+    } catch (e: any) {
+      if (e.message && !e.message.includes("JSON")) throw e
+      // Not JSON — that's fine, parseCliOutput will handle it
+    }
 
-Remember: Output ONLY the JSON object. No other text.`)
+    return this.parseCliOutput(output)
+  }
 
-    // Add conversation messages
-    for (const msg of userMsgs) {
-      if (msg.role === "user") {
-        parts.push(`\nUser request: ${msg.content}`)
-      } else if (msg.role === "assistant") {
-        parts.push(`\nPrevious assistant response: ${msg.content}`)
+  /**
+   * Generate via direct Anthropic API call (for API key auth).
+   */
+  private async generateViaApi(
+    messages: GenerationMessage[],
+    options?: ProviderOptions
+  ): Promise<GenerationResult> {
+    const model = options?.model || DEFAULT_MODEL
+    const maxTokens = options?.maxTokens || DEFAULT_MAX_TOKENS
+
+    const systemMsg = messages.find((m) => m.role === "system")
+    const conversationMsgs = messages
+      .filter((m) => m.role !== "system")
+      .map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      }))
+
+    const body: Record<string, unknown> = {
+      model,
+      max_tokens: maxTokens,
+      messages: conversationMsgs,
+      tools: TOOLS,
+    }
+
+    if (systemMsg) {
+      body.system = systemMsg.content
+    }
+
+    if (options?.temperature !== undefined) {
+      body.temperature = options.temperature
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "anthropic-version": "2023-06-01",
+      "x-api-key": this.credential.token,
+    }
+
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    })
+
+    if (!res.ok) {
+      const errorText = await res.text()
+      throw new Error(`Anthropic API error (${res.status}): ${errorText}`)
+    }
+
+    const response = (await res.json()) as AnthropicResponse
+    return this.parseApiResponse(response)
+  }
+
+  /**
+   * Stream responses. For OAuth, uses CLI with --output-format stream-json.
+   * For API keys, uses SSE streaming.
+   */
+  async *stream(
+    messages: GenerationMessage[],
+    options?: ProviderOptions
+  ): AsyncIterable<StreamEvent> {
+    if (this.credential.type === "oauth") {
+      // CLI streaming via --output-format stream-json
+      yield* this.streamViaCli(messages, options)
+    } else {
+      // API streaming via SSE (same as ClaudeProvider.stream)
+      yield* this.streamViaApi(messages, options)
+    }
+  }
+
+  private async *streamViaCli(
+    messages: GenerationMessage[],
+    options?: ProviderOptions
+  ): AsyncIterable<StreamEvent> {
+    const model = options?.model || loadAuthConfig()?.model || DEFAULT_MODEL
+    const cliModel = CLI_MODEL_ALIASES[model] || model
+
+    const systemMsg = messages.find((m) => m.role === "system")
+    const userMsgs = messages.filter((m) => m.role === "user")
+    const prompt = userMsgs.map((m) => m.content).join("\n\n")
+
+    const args = [
+      "-p",
+      "--output-format", "stream-json",
+      "--model", cliModel,
+      "--dangerously-skip-permissions",
+    ]
+
+    if (systemMsg) {
+      args.push("--append-system-prompt", systemMsg.content)
+    }
+
+    args.push(prompt)
+
+    const env = { ...process.env }
+    delete env.ANTHROPIC_API_KEY
+    delete env.ANTHROPIC_API_KEY_OLD
+
+    const child = execa("claude", args, {
+      env,
+      extendEnv: false,
+      reject: false,
+      timeout: 300_000,
+      stdin: "ignore",
+    })
+
+    let fullContent = ""
+
+    if (child.stdout) {
+      const decoder = new TextDecoder()
+      const readable = child.stdout as unknown as AsyncIterable<Uint8Array>
+
+      for await (const chunk of readable) {
+        const text = typeof chunk === "string" ? chunk : decoder.decode(chunk, { stream: true })
+        // Stream JSON format: each line is a JSON object
+        const lines = text.split("\n").filter(Boolean)
+        for (const line of lines) {
+          try {
+            const event = JSON.parse(line)
+            if (event.type === "assistant" && event.message) {
+              fullContent += event.message
+              yield { type: "text_delta", text: event.message }
+            } else if (event.type === "result") {
+              fullContent = event.result || fullContent
+            }
+          } catch {
+            // Not JSON, treat as raw text
+            fullContent += line
+            yield { type: "text_delta", text: line }
+          }
+        }
       }
     }
 
-    const fullPrompt = parts.join("\n\n")
+    await child
 
-    // Use claude CLI in print mode (-p flag) — async so spinner stays alive
-    const result = await this.runClaude(fullPrompt, options)
-
-    return this.parseResponse(result)
+    const files = this.extractFilesFromText(fullContent)
+    yield {
+      type: "done",
+      result: { content: fullContent, files, tokensUsed: 0 },
+    }
   }
 
-  private async runClaude(prompt: string, options?: ProviderOptions): Promise<string> {
-    // Build args - use -p for print mode (non-interactive, single prompt)
-    // --output-format json gives us structured output
-    const args: string[] = ["-p", "--output-format", "json"]
+  private async *streamViaApi(
+    messages: GenerationMessage[],
+    options?: ProviderOptions
+  ): AsyncIterable<StreamEvent> {
+    const model = options?.model || DEFAULT_MODEL
+    const maxTokens = options?.maxTokens || DEFAULT_MAX_TOKENS
 
-    // Add model if specified
-    if (options?.model) {
-      args.push("--model", options.model)
+    const systemMsg = messages.find((m) => m.role === "system")
+    const conversationMsgs = messages
+      .filter((m) => m.role !== "system")
+      .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
+
+    const body: Record<string, unknown> = {
+      model,
+      max_tokens: maxTokens,
+      messages: conversationMsgs,
+      tools: TOOLS,
+      stream: true,
     }
 
-    // Limit to 1 turn for generation calls
-    args.push("--max-turns", "1")
+    if (systemMsg) body.system = systemMsg.content
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "anthropic-version": "2023-06-01",
+      "x-api-key": this.credential.token,
+    }
+
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    })
+
+    if (!res.ok) {
+      const errorText = await res.text()
+      yield { type: "error", error: `Anthropic API error (${res.status}): ${errorText}` }
+      return
+    }
+
+    const reader = res.body?.getReader()
+    if (!reader) {
+      yield { type: "error", error: "No response body" }
+      return
+    }
+
+    const decoder = new TextDecoder()
+    let buffer = ""
+    let content = ""
+    let tokensUsed = 0
 
     try {
-      const result = await execa("claude", args, {
-        input: prompt,
-        timeout: 300000, // 5 min timeout
-        maxBuffer: 50 * 1024 * 1024, // 50MB buffer
-        reject: false, // Don't throw on non-zero exit
-      })
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
 
-      if (result.stdout) {
-        return result.stdout.trim()
-      }
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+        buffer = lines.pop() || ""
 
-      if (result.stderr) {
-        const stderr = result.stderr
-        if (stderr.includes("not logged in") || stderr.includes("auth")) {
-          throw new Error(
-            "Claude Code not authenticated. Run: claude login"
-          )
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue
+          const data = line.slice(6).trim()
+          if (data === "[DONE]") continue
+
+          try {
+            const event = JSON.parse(data)
+            if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
+              content += event.delta.text
+              yield { type: "text_delta", text: event.delta.text }
+            }
+            if (event.type === "message_delta" && event.usage) {
+              tokensUsed = (event.usage.input_tokens || 0) + (event.usage.output_tokens || 0)
+            }
+          } catch {
+            // Skip
+          }
         }
-        // Some CLI versions write output to stderr
-        if (stderr.includes('"files"') || stderr.includes('"result"')) {
-          return stderr.trim()
-        }
-        throw new Error(`Claude Code error: ${stderr}`)
       }
+    } finally {
+      reader.releaseLock()
+    }
 
-      throw new Error("Claude Code returned no output")
-    } catch (error: any) {
-      if (error.message?.includes("ENOENT")) {
-        throw new Error(
-          "Claude Code CLI not found. Install it with: npm install -g @anthropic-ai/claude-code"
-        )
-      }
-      throw error
+    const files = this.extractFilesFromText(content)
+    yield {
+      type: "done",
+      result: { content, files, tokensUsed },
     }
   }
 
-  private parseResponse(raw: string): GenerationResult {
+  /**
+   * Parse JSON output from the `claude` CLI.
+   */
+  private parseCliOutput(stdout: string): GenerationResult {
+    let parsed: any
+    try {
+      parsed = JSON.parse(stdout)
+    } catch {
+      // CLI returned plain text
+      return {
+        content: stdout.trim(),
+        files: [],
+        tokensUsed: 0,
+      }
+    }
+
+    // Claude CLI JSON format: { result: "...", session_id: "...", ... }
+    const text = parsed.result || parsed.text || parsed.content || ""
+
+    // Extract files from the text if it contains code blocks with file paths
+    const files = this.extractFilesFromText(text)
+
+    return {
+      content: text,
+      files,
+      tokensUsed: parsed.usage
+        ? (parsed.usage.input_tokens || 0) + (parsed.usage.output_tokens || 0)
+        : 0,
+    }
+  }
+
+  /**
+   * Extract file blocks from CLI text output.
+   * Looks for patterns like: ```path/to/file.ts ... ```
+   */
+  private extractFilesFromText(text: string): GeneratedFile[] {
+    const files: GeneratedFile[] = []
+    // Match fenced code blocks with a file path hint on the opening line
+    const pattern = /```[\w]*\s*([\w/._-]+\.\w+)\n([\s\S]*?)```/g
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(text)) !== null) {
+      const filePath = match[1]
+      const content = match[2]
+      if (filePath && content) {
+        files.push({ path: filePath, content: content.trimEnd() })
+      }
+    }
+    return files
+  }
+
+  /**
+   * Parse Anthropic API response (tool-use format).
+   */
+  private parseApiResponse(response: AnthropicResponse): GenerationResult {
     const files: GeneratedFile[] = []
     let content = ""
     let followUp: string | undefined
 
-    // The claude CLI with --output-format json returns a JSON object with a "result" field
-    try {
-      const outer = JSON.parse(raw)
-      // Claude CLI JSON output format: { result: "..." , ... }
-      const text = outer.result || outer.content || outer.text || raw
-
-      // Now try to parse the inner content as our structured format
-      return this.parseStructuredOutput(typeof text === "string" ? text : JSON.stringify(text))
-    } catch {
-      // Not valid JSON wrapper, try direct parse
-    }
-
-    // Try to parse as our structured JSON format directly
-    try {
-      return this.parseStructuredOutput(raw)
-    } catch {
-      // Not structured JSON
-    }
-
-    // Try to extract JSON from markdown code blocks
-    const jsonBlockMatch = raw.match(/```(?:json)?\s*\n([\s\S]*?)\n\s*```/)
-    if (jsonBlockMatch) {
-      try {
-        return this.parseStructuredOutput(jsonBlockMatch[1])
-      } catch {
-        // Not valid JSON in code block
+    for (const block of response.content) {
+      if (block.type === "text") {
+        content += block.text || ""
       }
-    }
 
-    // Fallback: try to extract any JSON object from the response
-    const jsonMatch = raw.match(/\{[\s\S]*"files"[\s\S]*\}/)
-    if (jsonMatch) {
-      try {
-        return this.parseStructuredOutput(jsonMatch[0])
-      } catch {
-        // Not valid JSON
-      }
-    }
+      if (block.type === "tool_use") {
+        if (block.name === "create_files" && block.input) {
+          const input = block.input as {
+            files: GeneratedFile[]
+            summary?: string
+          }
+          files.push(...(input.files || []))
+          if (input.summary) {
+            content += `\n${input.summary}`
+          }
+        }
 
-    // Last resort: return as plain text content
-    content = raw
-    return { content, files, followUp, tokensUsed: undefined }
-  }
-
-  private parseStructuredOutput(text: string): GenerationResult {
-    const data = JSON.parse(text)
-    const files: GeneratedFile[] = []
-
-    if (Array.isArray(data.files)) {
-      for (const f of data.files) {
-        if (f.path && f.content) {
-          files.push({
-            path: f.path,
-            content: f.content,
-            language: f.language,
-            description: f.description,
-          })
+        if (block.name === "ask_user" && block.input) {
+          const input = block.input as { question: string; options?: string[] }
+          followUp = input.question
+          if (input.options?.length) {
+            followUp += `\nOptions: ${input.options.join(", ")}`
+          }
         }
       }
     }
 
     return {
-      content: data.summary || "",
+      content,
       files,
-      followUp: data.followUp || undefined,
-      tokensUsed: undefined, // Claude CLI doesn't expose token count
+      followUp,
+      tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
     }
   }
 }

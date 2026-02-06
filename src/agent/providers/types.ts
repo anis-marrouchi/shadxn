@@ -28,6 +28,14 @@ export interface ProviderOptions {
   apiKey?: string
 }
 
+export type StreamEvent =
+  | { type: "text_delta"; text: string }
+  | { type: "tool_use_start"; name: string; id: string }
+  | { type: "tool_use_delta"; json: string }
+  | { type: "tool_use_end"; name: string }
+  | { type: "done"; result: GenerationResult }
+  | { type: "error"; error: string }
+
 export interface AgentProvider {
   name: string
   generate(
@@ -37,7 +45,7 @@ export interface AgentProvider {
   stream?(
     messages: GenerationMessage[],
     options?: ProviderOptions
-  ): AsyncIterable<string>
+  ): AsyncIterable<StreamEvent>
 }
 
 // --- Agent configuration ---

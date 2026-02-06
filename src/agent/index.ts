@@ -1,6 +1,8 @@
 import type { AgentProvider, GenerationMessage, GenerationResult, OutputType } from "./providers/types"
 import { agentConfigSchema, type AgentConfig } from "./providers/types"
 import { createProvider, type ProviderName } from "./providers"
+import { loadAuthConfig } from "@/src/utils/auth-store"
+import { ensureCredentials } from "@/src/commands/model"
 import { detectTechStack, formatTechStack, type TechStack } from "./context/tech-stack"
 import { detectSchemas, formatSchemas, type ProjectSchemas } from "./context/schema"
 import { gatherContext7Docs } from "./context/context7"
@@ -8,6 +10,7 @@ import { loadLocalSkills, matchSkillsToTask } from "./skills/loader"
 import { resolveOutputType } from "./outputs/types"
 import { writeGeneratedFiles, resolveOutputDir, type WriteOptions, type WriteResult } from "./outputs/handlers"
 import { logger } from "@/src/utils/logger"
+import { globalHooks } from "@/src/hooks"
 import type { Skill } from "./skills/types"
 
 // --- Agent Orchestrator: the brain that coordinates everything ---
@@ -34,6 +37,7 @@ export interface GenerateOptions {
   interactive?: boolean
   skills?: string[] // Additional skill packages to load
   maxSteps?: number // Max agentic loop iterations (default 5)
+  sessionMessages?: GenerationMessage[] // Multi-turn context from REPL sessions
 }
 
 export interface GenerateResult {
@@ -91,19 +95,47 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     maxSteps = 5,
   } = options
 
+  // 0. pre:prompt hook — can modify or block the task prompt
+  let effectiveTask = task
+  if (globalHooks.has("pre:prompt")) {
+    const promptResult = await globalHooks.execute("pre:prompt", {
+      event: "pre:prompt",
+      task,
+      cwd,
+    })
+    if (promptResult.blocked) {
+      throw new Error(promptResult.message || "Blocked by pre:prompt hook")
+    }
+    if (promptResult.modified?.task) {
+      effectiveTask = String(promptResult.modified.task)
+    }
+  }
+
+  // 0b. pre:generate hook — can block the entire generation
+  if (globalHooks.has("pre:generate")) {
+    const genResult = await globalHooks.execute("pre:generate", {
+      event: "pre:generate",
+      task: effectiveTask,
+      cwd,
+    })
+    if (genResult.blocked) {
+      throw new Error(genResult.message || "Blocked by pre:generate hook")
+    }
+  }
+
   // 1. Gather context
   logger.info("Analyzing project...")
-  const context = await createAgentContext(cwd, task, {
+  const context = await createAgentContext(cwd, effectiveTask, {
     provider: providerName,
     context7: { enabled: context7, apiKey },
   })
 
   // 2. Resolve output type
-  const outputType = resolveOutputType(options.outputType, task)
+  const outputType = resolveOutputType(options.outputType, effectiveTask)
   logger.info(`Output type: ${outputType}`)
 
   // 3. Match relevant skills
-  const matchedSkills = matchSkillsToTask(context.skills, task, outputType)
+  const matchedSkills = matchSkillsToTask(context.skills, effectiveTask, outputType)
   if (matchedSkills.length) {
     logger.info(
       `Loaded ${matchedSkills.length} relevant skill(s): ${matchedSkills.map((m) => m.skill.frontmatter.name).join(", ")}`
@@ -113,12 +145,23 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
   // 4. Build system prompt
   const systemPrompt = buildSystemPrompt(context, outputType, matchedSkills.map((m) => m.skill))
 
-  // 5. Create provider and run multi-step agent loop
+  // 5. Ensure credentials exist (auto-prompt if missing)
+  const hasCredentials = await ensureCredentials(apiKey)
+  if (!hasCredentials) {
+    throw new Error("No credentials configured. Run `shadxn model` to set up.")
+  }
+
+  // 6. Create provider and run multi-step agent loop
   const provider = createProvider(providerName, apiKey)
+
+  // Resolve model: explicit flag → stored config → provider default
+  const resolvedModel = model || loadAuthConfig()?.model
 
   const messages: GenerationMessage[] = [
     { role: "system", content: systemPrompt },
-    { role: "user", content: task },
+    // Include prior session messages for multi-turn REPL context
+    ...(options.sessionMessages || []),
+    { role: "user", content: effectiveTask },
   ]
 
   logger.info("Generating...")
@@ -140,7 +183,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     }
 
     const result = await provider.generate(messages, {
-      model,
+      model: resolvedModel,
       maxTokens: 8192,
     })
 
@@ -198,6 +241,22 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     logger.info(`Completed in ${step} step(s)`)
   }
 
+  // post:response hook — can modify or block the AI response
+  if (globalHooks.has("post:response")) {
+    const responseResult = await globalHooks.execute("post:response", {
+      event: "post:response",
+      content,
+      task: effectiveTask,
+      cwd,
+    })
+    if (responseResult.blocked) {
+      throw new Error(responseResult.message || "Blocked by post:response hook")
+    }
+    if (responseResult.modified?.content) {
+      content = String(responseResult.modified.content)
+    }
+  }
+
   // 6. Handle follow-up questions (interactive mode)
   if (followUp && interactive) {
     return {
@@ -224,6 +283,16 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     dryRun,
     outputDir,
   })
+
+  // post:generate hook — post-processing (format, lint, etc.)
+  if (globalHooks.has("post:generate")) {
+    await globalHooks.execute("post:generate", {
+      event: "post:generate",
+      task: effectiveTask,
+      content,
+      cwd,
+    })
+  }
 
   return {
     files: writeResult,

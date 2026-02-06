@@ -4,6 +4,7 @@ import type { GeneratedFile } from "../providers/types"
 import type { TechStack } from "../context/tech-stack"
 import { OUTPUT_CONFIGS } from "./types"
 import { logger } from "@/src/utils/logger"
+import { globalHooks } from "@/src/hooks"
 
 // --- Write generated files to disk ---
 
@@ -32,6 +33,24 @@ export async function writeGeneratedFiles(
       : path.resolve(options.cwd, options.outputDir || "", file.path)
 
     try {
+      // pre:file-write hook — can block or modify file content
+      let fileContent = file.content
+      if (globalHooks.has("pre:file-write")) {
+        const hookResult = await globalHooks.execute("pre:file-write", {
+          event: "pre:file-write",
+          file: filePath,
+          fileContent,
+          cwd: options.cwd,
+        })
+        if (hookResult.blocked) {
+          result.skipped.push(filePath)
+          continue
+        }
+        if (hookResult.modified?.fileContent) {
+          fileContent = String(hookResult.modified.fileContent)
+        }
+      }
+
       if (existsSync(filePath) && !options.overwrite) {
         result.skipped.push(filePath)
         continue
@@ -47,8 +66,18 @@ export async function writeGeneratedFiles(
       await fs.mkdir(dir, { recursive: true })
 
       // Write file
-      await fs.writeFile(filePath, file.content, "utf8")
+      await fs.writeFile(filePath, fileContent, "utf8")
       result.written.push(filePath)
+
+      // post:file-write hook — post-processing (format, git add, etc.)
+      if (globalHooks.has("post:file-write")) {
+        await globalHooks.execute("post:file-write", {
+          event: "post:file-write",
+          file: filePath,
+          fileContent,
+          cwd: options.cwd,
+        })
+      }
     } catch (error: any) {
       result.errors.push(`${filePath}: ${error.message}`)
     }

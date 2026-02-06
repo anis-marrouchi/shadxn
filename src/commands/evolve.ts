@@ -4,6 +4,7 @@ import { handleError } from "@/src/utils/handle-error"
 import { logger } from "@/src/utils/logger"
 import { createAgentContext } from "@/src/agent"
 import { createProvider, type ProviderName } from "@/src/agent/providers"
+import { ensureCredentials } from "@/src/commands/model"
 import type { GenerationMessage, GeneratedFile } from "@/src/agent/providers/types"
 import { formatTechStack } from "@/src/agent/context/tech-stack"
 import { formatSchemas } from "@/src/agent/context/schema"
@@ -164,6 +165,13 @@ ${task}
 ${filesSummary}
 
 Transform these files according to the task. For each file that needs changes, use \`create_files\` with the complete updated file content. Only include files that actually need changes — skip files that don't need modification.`
+
+      // Ensure credentials exist (auto-prompt if missing)
+      const hasCredentials = await ensureCredentials(opts.apiKey)
+      if (!hasCredentials) {
+        logger.error("No credentials configured. Run `shadxn model` to set up.")
+        process.exit(1)
+      }
 
       // Generate with provider
       const provider = createProvider(opts.provider as ProviderName, opts.apiKey)
