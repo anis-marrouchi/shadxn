@@ -5,7 +5,8 @@ import type {
   GeneratedFile,
   ProviderOptions,
 } from "./types"
-import { execSync, type ExecSyncOptionsWithStringEncoding } from "child_process"
+import { execSync } from "child_process"
+import { execa } from "execa"
 
 // --- Claude Code provider: uses the `claude` CLI (works with your Claude subscription) ---
 
@@ -78,14 +79,14 @@ Remember: Output ONLY the JSON object. No other text.`)
 
     const fullPrompt = parts.join("\n\n")
 
-    // Use claude CLI in print mode (-p flag) with --output-format for structured output
-    const result = this.runClaude(fullPrompt, options)
+    // Use claude CLI in print mode (-p flag) — async so spinner stays alive
+    const result = await this.runClaude(fullPrompt, options)
 
     return this.parseResponse(result)
   }
 
-  private runClaude(prompt: string, options?: ProviderOptions): string {
-    // Build the command - use -p for print mode (non-interactive, single prompt)
+  private async runClaude(prompt: string, options?: ProviderOptions): Promise<string> {
+    // Build args - use -p for print mode (non-interactive, single prompt)
     // --output-format json gives us structured output
     const args: string[] = ["-p", "--output-format", "json"]
 
@@ -94,45 +95,43 @@ Remember: Output ONLY the JSON object. No other text.`)
       args.push("--model", options.model)
     }
 
-    // Add max tokens if specified
-    if (options?.maxTokens) {
-      args.push("--max-turns", "1")
-    }
-
-    const cmd = `claude ${args.join(" ")}`
+    // Limit to 1 turn for generation calls
+    args.push("--max-turns", "1")
 
     try {
-      const execOpts: ExecSyncOptionsWithStringEncoding = {
-        encoding: "utf-8",
-        maxBuffer: 50 * 1024 * 1024, // 50MB buffer for large outputs
-        timeout: 300000, // 5 min timeout
+      const result = await execa("claude", args, {
         input: prompt,
-        stdio: ["pipe", "pipe", "pipe"],
+        timeout: 300000, // 5 min timeout
+        maxBuffer: 50 * 1024 * 1024, // 50MB buffer
+        reject: false, // Don't throw on non-zero exit
+      })
+
+      if (result.stdout) {
+        return result.stdout.trim()
       }
 
-      const output = execSync(cmd, execOpts)
-      return output.toString().trim()
-    } catch (error: any) {
-      if (error.status === 127) {
-        throw new Error(
-          "Claude Code CLI not found. Install it with: npm install -g @anthropic-ai/claude-code"
-        )
-      }
-      // If the command ran but returned non-zero, stderr might have the error
-      if (error.stderr) {
-        const stderr = error.stderr.toString()
+      if (result.stderr) {
+        const stderr = result.stderr
         if (stderr.includes("not logged in") || stderr.includes("auth")) {
           throw new Error(
             "Claude Code not authenticated. Run: claude login"
           )
         }
+        // Some CLI versions write output to stderr
+        if (stderr.includes('"files"') || stderr.includes('"result"')) {
+          return stderr.trim()
+        }
         throw new Error(`Claude Code error: ${stderr}`)
       }
-      // If there's stdout even on error, try to use it
-      if (error.stdout) {
-        return error.stdout.toString().trim()
+
+      throw new Error("Claude Code returned no output")
+    } catch (error: any) {
+      if (error.message?.includes("ENOENT")) {
+        throw new Error(
+          "Claude Code CLI not found. Install it with: npm install -g @anthropic-ai/claude-code"
+        )
       }
-      throw new Error(`Claude Code failed: ${error.message}`)
+      throw error
     }
   }
 
