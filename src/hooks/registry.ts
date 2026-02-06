@@ -2,6 +2,7 @@ import { execa } from "execa"
 import type { HookEvent, HookDefinition, HookContext, HookResult, HookHandler } from "./types"
 import { BLOCKING_EVENTS } from "./types"
 import { logger } from "@/src/utils/logger"
+import { debug } from "@/src/observability"
 
 // --- Hook Registry: registration, priority ordering, execution ---
 
@@ -44,21 +45,28 @@ export class HookRegistry {
     let combinedModified: Record<string, unknown> = {}
 
     for (const hook of registered) {
+      const start = Date.now()
       try {
         const result = await hook.handler({ ...context, ...combinedModified })
+        const duration = Date.now() - start
 
         if (result.modified) {
           combinedModified = { ...combinedModified, ...result.modified }
         }
 
         if (canBlock && result.blocked) {
+          debug.hook(hook.definition.name, duration, "blocked")
           return {
             blocked: true,
             message: result.message || `Blocked by hook: ${hook.definition.name}`,
             modified: combinedModified,
           }
         }
+
+        debug.hook(hook.definition.name, duration, "ok")
       } catch (error: any) {
+        const duration = Date.now() - start
+        debug.hook(hook.definition.name, duration, `error: ${error.message}`)
         logger.warn(`Hook "${hook.definition.name}" failed: ${error.message}`)
         // Non-blocking hooks swallow errors; blocking hooks propagate
         if (canBlock) {

@@ -9,6 +9,9 @@ import { Command } from "commander"
 import ora from "ora"
 import prompts from "prompts"
 import { z } from "zod"
+import { setDebug } from "@/src/observability"
+import { globalTracker } from "@/src/observability"
+import { globalPermissions, type PermissionMode } from "@/src/permissions"
 
 const generateOptionsSchema = z.object({
   task: z.string().optional(),
@@ -56,9 +59,19 @@ export const gen = new Command()
     "5"
   )
   .option("-y, --yes", "skip confirmation prompts", false)
+  .option("--debug", "enable debug mode with verbose logging", false)
+  .option("--mode <mode>", "permission mode (default, acceptEdits, plan, yolo)", "yolo")
   .action(async (taskParts, opts) => {
     try {
       let task = taskParts?.length ? taskParts.join(" ") : opts.task
+
+      if (opts.debug) {
+        setDebug(true)
+      }
+
+      if (opts.mode) {
+        globalPermissions.setMode(opts.mode as PermissionMode)
+      }
 
       const cwd = path.resolve(opts.cwd)
       if (!existsSync(cwd)) {
@@ -213,6 +226,15 @@ function printResult(result: any) {
 
   if (result.tokensUsed) {
     logger.break()
-    logger.info(`Tokens used: ${result.tokensUsed}`)
+    const summary = globalTracker.getSummary()
+    if (summary.steps.length > 1) {
+      logger.info(`Tokens used: ${result.tokensUsed} across ${summary.steps.length} steps`)
+      for (const step of summary.steps) {
+        logger.info(`  Step ${step.step}: ${(step.inputTokens + step.outputTokens).toLocaleString()} tokens ($${step.cost.toFixed(4)})`)
+      }
+      logger.info(`  Total cost: $${summary.totalCost.toFixed(4)}`)
+    } else {
+      logger.info(`Tokens used: ${result.tokensUsed} ($${summary.totalCost.toFixed(4)})`)
+    }
   }
 }

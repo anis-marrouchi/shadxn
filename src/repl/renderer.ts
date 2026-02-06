@@ -1,5 +1,6 @@
 import chalk from "chalk"
 import type { WriteResult } from "@/src/agent/outputs/handlers"
+import type { UsageSummary } from "@/src/observability"
 
 // --- Terminal rendering utilities for the REPL ---
 
@@ -101,9 +102,12 @@ export function renderHelp(): void {
   console.log(`  ${chalk.cyan("/save")}      Save current session`)
   console.log(`  ${chalk.cyan("/load")}      Load a saved session`)
   console.log(`  ${chalk.cyan("/undo")}      Undo last generation`)
-  console.log(`  ${chalk.cyan("/cost")}      Show token usage and cost`)
+  console.log(`  ${chalk.cyan("/cost")}      Show token usage and cost breakdown`)
+  console.log(`  ${chalk.cyan("/export")}    Export session as markdown`)
   console.log(`  ${chalk.cyan("/files")}     List generated files`)
   console.log(`  ${chalk.cyan("/context")}   Show session context info`)
+  console.log(`  ${chalk.cyan("/memory")}    Show memory stats and preferences`)
+  console.log(`  ${chalk.cyan("/mode")}      Switch permission mode`)
   console.log(`  ${chalk.cyan("/commit")}    Commit generated files with AI message`)
   console.log(`  ${chalk.cyan("/diff")}      Show git diff`)
   console.log(`  ${chalk.cyan("/status")}    Show git status`)
@@ -137,6 +141,61 @@ export function renderGitStatus(status: {
   }
   if (status.untracked.length) {
     console.log(chalk.dim(`  Untracked: ${status.untracked.length}`))
+  }
+  console.log()
+}
+
+/**
+ * Render detailed cost breakdown with per-step and per-model info.
+ */
+export function renderCostBreakdown(summary: UsageSummary): void {
+  console.log()
+  console.log(chalk.bold("  Cost Breakdown"))
+  console.log()
+  console.log(
+    chalk.dim(
+      `  Total: ${summary.totalTokens.toLocaleString()} tokens ($${summary.totalCost.toFixed(4)})`
+    )
+  )
+  console.log(
+    chalk.dim(
+      `  Input: ${summary.totalInputTokens.toLocaleString()} | Output: ${summary.totalOutputTokens.toLocaleString()}`
+    )
+  )
+
+  if (Object.keys(summary.models).length) {
+    console.log()
+    console.log(chalk.dim("  Per model:"))
+    for (const [model, usage] of Object.entries(summary.models)) {
+      console.log(
+        `    ${chalk.cyan(model)}: ${(usage.inputTokens + usage.outputTokens).toLocaleString()} tokens, $${usage.cost.toFixed(4)} (${usage.steps} step${usage.steps !== 1 ? "s" : ""})`
+      )
+    }
+  }
+
+  if (summary.steps.length > 1) {
+    console.log()
+    console.log(chalk.dim("  Per step:"))
+    for (const step of summary.steps) {
+      console.log(
+        `    Step ${step.step}: ${(step.inputTokens + step.outputTokens).toLocaleString()} tokens ($${step.cost.toFixed(4)})`
+      )
+    }
+  }
+  console.log()
+}
+
+/**
+ * Render a plan preview showing what files would be written (for plan mode).
+ */
+export function renderPlan(files: Array<{ path: string; action: string }>): void {
+  console.log()
+  console.log(chalk.bold("  Plan Preview"))
+  console.log(chalk.dim("  No files will be written in plan mode."))
+  console.log()
+  for (const file of files) {
+    const icon = file.action === "create" ? chalk.green("+") : chalk.yellow("~")
+    console.log(`    ${icon} ${file.path} (${file.action})`)
   }
   console.log()
 }

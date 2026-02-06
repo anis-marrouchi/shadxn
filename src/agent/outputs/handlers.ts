@@ -5,6 +5,7 @@ import type { TechStack } from "../context/tech-stack"
 import { OUTPUT_CONFIGS } from "./types"
 import { logger } from "@/src/utils/logger"
 import { globalHooks } from "@/src/hooks"
+import { globalPermissions } from "@/src/permissions"
 
 // --- Write generated files to disk ---
 
@@ -49,6 +50,19 @@ export async function writeGeneratedFiles(
         if (hookResult.modified?.fileContent) {
           fileContent = String(hookResult.modified.fileContent)
         }
+      }
+
+      // Permissions check — can allow, deny, or skip (plan mode)
+      const relativePath = path.relative(options.cwd, filePath)
+      const permission = await globalPermissions.checkFileWrite(relativePath)
+      if (permission === "deny") {
+        result.skipped.push(filePath)
+        continue
+      }
+      if (permission === "skip") {
+        // Plan mode: record what would be written but don't write
+        result.written.push(filePath)
+        continue
       }
 
       if (existsSync(filePath) && !options.overwrite) {

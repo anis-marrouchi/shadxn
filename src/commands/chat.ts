@@ -7,6 +7,8 @@ import { logger } from "@/src/utils/logger"
 import { getPackageInfo } from "@/src/utils/get-package-info"
 import { ReplEngine } from "@/src/repl"
 import { listSessions } from "@/src/repl/session"
+import { setDebug } from "@/src/observability"
+import { globalPermissions, type PermissionMode } from "@/src/permissions"
 
 export const chat = new Command()
   .name("chat")
@@ -22,6 +24,8 @@ export const chat = new Command()
   .option("-m, --model <model>", "model to use")
   .option("--api-key <key>", "API key for the provider")
   .option("-c, --cwd <cwd>", "working directory", process.cwd())
+  .option("--debug", "enable debug mode with verbose logging", false)
+  .option("--mode <mode>", "permission mode (default, acceptEdits, plan, yolo)", "yolo")
   .action(async (opts) => {
     try {
       // List sessions mode
@@ -45,6 +49,14 @@ export const chat = new Command()
         }
         console.log()
         return
+      }
+
+      if (opts.debug) {
+        setDebug(true)
+      }
+
+      if (opts.mode) {
+        globalPermissions.setMode(opts.mode as PermissionMode)
       }
 
       const cwd = path.resolve(opts.cwd)

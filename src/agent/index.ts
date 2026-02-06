@@ -11,6 +11,9 @@ import { resolveOutputType } from "./outputs/types"
 import { writeGeneratedFiles, resolveOutputDir, type WriteOptions, type WriteResult } from "./outputs/handlers"
 import { logger } from "@/src/utils/logger"
 import { globalHooks } from "@/src/hooks"
+import { globalTracker } from "@/src/observability"
+import { debug } from "@/src/observability"
+import { MemoryHierarchy, ContextBuilder, loadProjectInstructions } from "@/src/memory"
 import type { Skill } from "./skills/types"
 
 // --- Agent Orchestrator: the brain that coordinates everything ---
@@ -21,6 +24,8 @@ export interface AgentContext {
   skills: Skill[]
   docs: string
   config: AgentConfig
+  memoryContext: string
+  projectInstructions: string
 }
 
 export interface GenerateOptions {
@@ -55,6 +60,10 @@ export async function createAgentContext(
 ): Promise<AgentContext> {
   const agentConfig = agentConfigSchema.parse(config || {})
 
+  // Load memory hierarchy
+  const memory = new MemoryHierarchy(cwd)
+  await memory.load()
+
   // Gather all context in parallel
   const [techStack, schemas, skills] = await Promise.all([
     detectTechStack(cwd),
@@ -72,12 +81,23 @@ export async function createAgentContext(
     }
   }
 
+  // Build memory context from both user and project levels
+  const memoryContext = memory.buildMemoryContext(task)
+
+  // Load project instructions (SHADXN.md or CLAUDE.md) with @-import resolution
+  const projectInstructions = loadProjectInstructions(cwd)
+
+  debug.context("memory", memoryContext ? "loaded" : "empty")
+  debug.context("instructions", projectInstructions ? "loaded from project" : "none")
+
   return {
     techStack,
     schemas,
     skills,
     docs,
     config: agentConfig,
+    memoryContext,
+    projectInstructions,
   }
 }
 
@@ -181,6 +201,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     if (step > 1) {
       logger.info(`Step ${step}/${maxSteps}...`)
     }
+    debug.step(step, `Starting generation (model: ${resolvedModel || "default"})`)
 
     const result = await provider.generate(messages, {
       model: resolvedModel,
@@ -189,6 +210,16 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
 
     totalTokens += result.tokensUsed || 0
     content = result.content
+
+    // Track usage per step
+    const stepTokens = result.tokensUsed || 0
+    const stepModel = resolvedModel || "claude-sonnet-4-20250514"
+    // Estimate input/output split: ~30% input, ~70% output (rough heuristic)
+    const estInput = Math.round(stepTokens * 0.3)
+    const estOutput = stepTokens - estInput
+    globalTracker.recordStep(step, stepModel, estInput, estOutput)
+    debug.api("generate", stepModel, stepTokens)
+    debug.step(step, `Generated ${result.files.length} file(s), ${stepTokens} tokens`)
 
     // Collect generated files
     if (result.files.length) {
@@ -362,6 +393,16 @@ For complex tasks that require multiple related files (e.g., schema + API + UI +
   // Context7 docs
   if (context.docs) {
     sections.push(context.docs)
+  }
+
+  // Project instructions (SHADXN.md / CLAUDE.md)
+  if (context.projectInstructions) {
+    sections.push(`# Project Instructions\n${context.projectInstructions}`)
+  }
+
+  // Memory context (past generations, patterns, preferences)
+  if (context.memoryContext) {
+    sections.push(context.memoryContext)
   }
 
   // Output type guidance

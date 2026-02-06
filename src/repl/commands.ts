@@ -1,10 +1,15 @@
 import chalk from "chalk"
+import { writeFileSync } from "fs"
+import path from "path"
 import type { Session } from "./session"
 import { saveSession, loadSession, loadLatestSession, listSessions } from "./session"
-import { renderHelp, renderCost, renderGitStatus } from "./renderer"
+import { renderHelp, renderCost, renderCostBreakdown, renderGitStatus } from "./renderer"
 import { GitManager } from "@/src/git"
 import { createProvider } from "@/src/agent/providers"
 import { logger } from "@/src/utils/logger"
+import { globalTracker, exportSession } from "@/src/observability"
+import { MemoryHierarchy } from "@/src/memory"
+import { globalPermissions, PERMISSION_MODES, type PermissionMode } from "@/src/permissions"
 import prompts from "prompts"
 
 // --- REPL slash commands ---
@@ -139,7 +144,22 @@ registerCommand("undo", async (_args, ctx) => {
 })
 
 registerCommand("cost", async (_args, ctx) => {
-  renderCost(ctx.session.tokensUsed)
+  const summary = globalTracker.getSummary()
+  if (summary.steps.length > 0) {
+    renderCostBreakdown(summary)
+  } else {
+    renderCost(ctx.session.tokensUsed)
+  }
+  return true
+})
+
+registerCommand("export", async (args, ctx) => {
+  const summary = globalTracker.getSummary()
+  const markdown = exportSession(ctx.session, summary.steps.length ? summary : undefined)
+  const filename = args || `session-${ctx.session.id}.md`
+  const filePath = path.resolve(ctx.cwd, filename)
+  writeFileSync(filePath, markdown, "utf8")
+  logger.success(`  Session exported to ${filePath}`)
   return true
 })
 
@@ -168,6 +188,87 @@ registerCommand("context", async (_args, ctx) => {
   console.log(chalk.dim(`  Files: ${ctx.session.filesGenerated.length}`))
   console.log(chalk.dim(`  Created: ${new Date(ctx.session.createdAt).toLocaleString()}`))
   console.log()
+  return true
+})
+
+// --- Memory commands ---
+
+registerCommand("memory", async (_args, ctx) => {
+  try {
+    const memory = new MemoryHierarchy(ctx.cwd)
+    await memory.load()
+
+    const stats = memory.getStats()
+    const prefs = memory.getPreferences()
+    const patterns = memory.getPatterns()
+    const recent = memory.getRecentGenerations(5)
+
+    console.log()
+    console.log(chalk.bold("  Memory"))
+    console.log()
+    console.log(chalk.dim("  Project:"))
+    console.log(chalk.dim(`    Generations: ${stats.project.totalGenerations}`))
+    console.log(chalk.dim(`    Success rate: ${(stats.project.successRate * 100).toFixed(0)}%`))
+    console.log(chalk.dim(`    Heals: ${stats.project.totalHeals}`))
+    console.log()
+    console.log(chalk.dim("  Global:"))
+    console.log(chalk.dim(`    Generations: ${stats.user.totalGenerations}`))
+    console.log(chalk.dim(`    Success rate: ${(stats.user.successRate * 100).toFixed(0)}%`))
+
+    if (prefs.length) {
+      console.log()
+      console.log(chalk.dim("  Preferences:"))
+      for (const p of prefs.slice(0, 10)) {
+        console.log(chalk.dim(`    ${p.key}: ${p.value} (${(p.confidence * 100).toFixed(0)}%)`))
+      }
+    }
+
+    if (patterns.length) {
+      console.log()
+      console.log(chalk.dim("  Patterns:"))
+      for (const p of patterns.slice(0, 5)) {
+        console.log(chalk.dim(`    ${p.description} (${p.frequency}x)`))
+      }
+    }
+
+    if (recent.length) {
+      console.log()
+      console.log(chalk.dim("  Recent:"))
+      for (const r of recent) {
+        const status = r.success ? chalk.green("ok") : chalk.red("fail")
+        console.log(chalk.dim(`    [${status}] ${r.task.slice(0, 60)}`))
+      }
+    }
+
+    console.log()
+  } catch (error: any) {
+    logger.error(`  ${error.message}`)
+  }
+  return true
+})
+
+// --- Permission commands ---
+
+registerCommand("mode", async (args, _ctx) => {
+  if (args && PERMISSION_MODES.includes(args as PermissionMode)) {
+    globalPermissions.setMode(args as PermissionMode)
+    logger.success(`  Permission mode: ${args}`)
+  } else if (args) {
+    logger.warn(`  Unknown mode: ${args}. Valid modes: ${PERMISSION_MODES.join(", ")}`)
+  } else {
+    const current = globalPermissions.getMode()
+    console.log()
+    console.log(chalk.dim(`  Current mode: ${chalk.bold(current)}`))
+    console.log()
+    console.log(chalk.dim("  Available modes:"))
+    console.log(chalk.dim("    default     — confirm each file write"))
+    console.log(chalk.dim("    acceptEdits — auto-allow writes, confirm destructive ops"))
+    console.log(chalk.dim("    plan        — show plan without writing"))
+    console.log(chalk.dim("    yolo        — auto-allow everything"))
+    console.log()
+    console.log(chalk.dim(`  Usage: /mode <mode>`))
+    console.log()
+  }
   return true
 })
 

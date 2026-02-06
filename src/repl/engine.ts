@@ -4,10 +4,11 @@ import ora from "ora"
 import type { Session } from "./session"
 import { createSession, saveSession, loadSession, loadLatestSession } from "./session"
 import { isCommand, parseCommand, getCommand, type CommandContext } from "./commands"
-import { renderBanner, renderResponse, renderFiles, renderCost } from "./renderer"
+import { renderBanner, renderResponse, renderFiles, renderCost, renderPlan } from "./renderer"
 import { generate, type GenerateOptions } from "@/src/agent"
 import type { GenerationMessage } from "@/src/agent/providers/types"
 import { logger } from "@/src/utils/logger"
+import { globalPermissions } from "@/src/permissions"
 
 // --- REPL Engine ---
 
@@ -191,9 +192,13 @@ export class ReplEngine {
         renderResponse(result.content)
       }
 
-      // Render file results
+      // Render file results (plan mode shows preview instead)
       if (result.files.written.length || result.files.skipped.length || result.files.errors.length) {
-        renderFiles(result.files)
+        if (globalPermissions.getMode() === "plan") {
+          renderPlan(result.files.written.map((f) => ({ path: f, action: "create" })))
+        } else {
+          renderFiles(result.files)
+        }
       }
 
       // Track cost
