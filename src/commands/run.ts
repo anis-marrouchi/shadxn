@@ -17,8 +17,8 @@ export const run = new Command()
   .option("--host <host>", "server host", "0.0.0.0")
   .option(
     "-p, --provider <provider>",
-    "AI provider",
-    "claude"
+    "AI provider (claude-code, claude)",
+    "claude-code"
   )
   .option("-m, --model <model>", "model to use")
   .option("--api-key <key>", "API key")

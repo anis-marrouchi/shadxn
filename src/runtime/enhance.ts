@@ -30,7 +30,7 @@ const DEFAULT_CONFIG: EnhanceConfig = {
   enabled: true,
   autoSkills: true,
   minFrequency: 3,
-  provider: "claude",
+  provider: "claude-code",
 }
 
 export class EnhanceEngine {

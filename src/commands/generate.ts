@@ -16,7 +16,7 @@ const generateOptionsSchema = z.object({
   output: z.string().optional(),
   overwrite: z.boolean().default(false),
   dryRun: z.boolean().default(false),
-  provider: z.enum(["claude", "openai", "ollama", "custom"]).default("claude"),
+  provider: z.enum(["claude-code", "claude", "openai", "ollama", "custom"]).default("claude-code"),
   model: z.string().optional(),
   apiKey: z.string().optional(),
   cwd: z.string(),
@@ -39,8 +39,8 @@ export const gen = new Command()
   .option("--dry-run", "preview without writing files", false)
   .option(
     "-p, --provider <provider>",
-    "AI provider (claude, openai, ollama)",
-    "claude"
+    "AI provider (claude-code, claude, openai, ollama)",
+    "claude-code"
   )
   .option("-m, --model <model>", "model to use")
   .option("--api-key <key>", "API key for the provider")

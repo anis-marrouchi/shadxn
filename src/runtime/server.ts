@@ -31,7 +31,7 @@ export interface RuntimeConfig {
 const DEFAULT_CONFIG: RuntimeConfig = {
   port: 3170,
   host: "0.0.0.0",
-  provider: "claude",
+  provider: "claude-code",
   cwd: process.cwd(),
   memory: { enabled: true },
   heal: { enabled: true },
