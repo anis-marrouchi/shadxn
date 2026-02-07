@@ -11,6 +11,8 @@ export const HOOK_EVENTS = [
   "post:response",
   "pre:command",
   "on:error",
+  "pre:tool-call",
+  "post:tool-call",
 ] as const
 
 export type HookEvent = (typeof HOOK_EVENTS)[number]
@@ -22,6 +24,7 @@ export const BLOCKING_EVENTS: HookEvent[] = [
   "pre:prompt",
   "post:response",
   "pre:command",
+  "pre:tool-call",
 ]
 
 export type HookType = "command" | "prompt" | "script"

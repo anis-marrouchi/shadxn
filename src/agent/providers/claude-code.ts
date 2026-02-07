@@ -5,9 +5,13 @@ import type {
   GeneratedFile,
   ProviderOptions,
   StreamEvent,
+  AnthropicMessage,
+  RawGenerationResult,
+  ContentBlock,
 } from "./types"
 import { resolveToken, loadAuthConfig } from "@/src/utils/auth-store"
 import { execa } from "execa"
+import { getLegacyTools } from "../tools/definitions"
 
 // --- Claude Code provider: uses Claude CLI (subscription) or direct API (API key) ---
 
@@ -23,85 +27,19 @@ const CLI_MODEL_ALIASES: Record<string, string> = {
 
 type AuthCredential = { type: "oauth"; token: string } | { type: "api-key"; token: string }
 
-interface AnthropicContentBlock {
-  type: "text" | "tool_use" | "tool_result"
-  text?: string
-  id?: string
-  name?: string
-  input?: Record<string, unknown>
-}
-
 interface AnthropicResponse {
   id: string
-  content: AnthropicContentBlock[]
+  content: Array<{
+    type: "text" | "tool_use" | "tool_result"
+    text?: string
+    id?: string
+    name?: string
+    input?: Record<string, unknown>
+  }>
   model: string
   stop_reason: string
   usage: { input_tokens: number; output_tokens: number }
 }
-
-const TOOLS = [
-  {
-    name: "create_files",
-    description:
-      "Create one or more files as output. Use this when the user asks you to generate code, documents, configs, or any file-based output.",
-    input_schema: {
-      type: "object",
-      properties: {
-        files: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              path: {
-                type: "string",
-                description:
-                  "Relative file path from project root (e.g., src/components/Button.tsx)",
-              },
-              content: {
-                type: "string",
-                description: "The full content of the file",
-              },
-              language: {
-                type: "string",
-                description: "Programming language or file type",
-              },
-              description: {
-                type: "string",
-                description: "Brief description of what this file does",
-              },
-            },
-            required: ["path", "content"],
-          },
-        },
-        summary: {
-          type: "string",
-          description: "Brief summary of all generated files",
-        },
-      },
-      required: ["files"],
-    },
-  },
-  {
-    name: "ask_user",
-    description:
-      "Ask the user a clarifying question when you need more information to proceed.",
-    input_schema: {
-      type: "object",
-      properties: {
-        question: {
-          type: "string",
-          description: "The question to ask the user",
-        },
-        options: {
-          type: "array",
-          items: { type: "string" },
-          description: "Optional list of choices for the user",
-        },
-      },
-      required: ["question"],
-    },
-  },
-]
 
 export class ClaudeCodeProvider implements AgentProvider {
   name = "claude-code"
@@ -142,9 +80,87 @@ export class ClaudeCodeProvider implements AgentProvider {
   }
 
   /**
+   * generateRaw() for the agentic tool_result loop.
+   * Only available for API key auth — the CLI binary has its own agent loop.
+   */
+  async generateRaw(
+    messages: AnthropicMessage[],
+    systemPrompt: string,
+    tools: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>,
+    options?: ProviderOptions
+  ): Promise<RawGenerationResult> {
+    // OAuth path: not supported — the claude CLI has its own built-in tools
+    if (this.credential.type === "oauth") {
+      throw new Error("generateRaw() not available for OAuth/CLI mode")
+    }
+
+    const model = options?.model || DEFAULT_MODEL
+    const maxTokens = options?.maxTokens || DEFAULT_MAX_TOKENS
+
+    const body: Record<string, unknown> = {
+      model,
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages,
+      tools,
+    }
+
+    if (options?.temperature !== undefined) {
+      body.temperature = options.temperature
+    }
+
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "anthropic-version": "2023-06-01",
+      "x-api-key": this.credential.token,
+    }
+
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    })
+
+    if (!res.ok) {
+      const errorText = await res.text()
+      throw new Error(`Anthropic API error (${res.status}): ${errorText}`)
+    }
+
+    const response = (await res.json()) as AnthropicResponse
+
+    const content: ContentBlock[] = response.content.map((block) => {
+      if (block.type === "text") {
+        return { type: "text" as const, text: block.text || "" }
+      }
+      if (block.type === "tool_use") {
+        return {
+          type: "tool_use" as const,
+          id: block.id || "",
+          name: block.name || "",
+          input: block.input || {},
+        }
+      }
+      return { type: "text" as const, text: "" }
+    })
+
+    return {
+      content,
+      stop_reason: response.stop_reason as RawGenerationResult["stop_reason"],
+      usage: response.usage,
+    }
+  }
+
+  /**
+   * Returns true if this provider can use the agentic tool loop.
+   * Only available for API key auth (CLI mode falls back to legacy loop).
+   */
+  get supportsAgenticLoop(): boolean {
+    return this.credential.type === "api-key"
+  }
+
+  /**
    * Generate via the `claude` CLI binary.
    * This is how subscription billing works — the CLI handles auth internally.
-   * Same approach as OpenClaw's claude-cli backend.
    */
   private async generateViaCli(
     messages: GenerationMessage[],
@@ -226,7 +242,7 @@ export class ClaudeCodeProvider implements AgentProvider {
       model,
       max_tokens: maxTokens,
       messages: conversationMsgs,
-      tools: TOOLS,
+      tools: getLegacyTools(),
     }
 
     if (systemMsg) {
@@ -364,7 +380,7 @@ export class ClaudeCodeProvider implements AgentProvider {
       model,
       max_tokens: maxTokens,
       messages: conversationMsgs,
-      tools: TOOLS,
+      tools: getLegacyTools(),
       stream: true,
     }
 

@@ -15,6 +15,7 @@ import { globalTracker } from "@/src/observability"
 import { debug } from "@/src/observability"
 import { MemoryHierarchy, ContextBuilder, loadProjectInstructions } from "@/src/memory"
 import type { Skill } from "./skills/types"
+import { runAgenticLoop, supportsAgenticLoop, type AgenticProgressEvent } from "./orchestrator"
 
 // --- Agent Orchestrator: the brain that coordinates everything ---
 
@@ -41,7 +42,7 @@ export interface GenerateOptions {
   context7?: boolean
   interactive?: boolean
   skills?: string[] // Additional skill packages to load
-  maxSteps?: number // Max agentic loop iterations (default 5)
+  maxSteps?: number // Max agentic loop iterations (default 20 for agentic, 5 for legacy)
   sessionMessages?: GenerationMessage[] // Multi-turn context from REPL sessions
   heal?: boolean // undefined = auto (heal if files written), false = skip
   healConfig?: {
@@ -120,7 +121,6 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     apiKey,
     context7 = true,
     interactive = true,
-    maxSteps = 5,
   } = options
 
   // 0. pre:prompt hook — can modify or block the task prompt
@@ -179,105 +179,62 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     throw new Error("No credentials configured. Run `shadxn model` to set up.")
   }
 
-  // 6. Create provider and run multi-step agent loop
+  // 6. Create provider
   const provider = createProvider(providerName, apiKey)
-
-  // Resolve model: explicit flag → stored config → provider default
   const resolvedModel = model || loadAuthConfig()?.model
 
-  const messages: GenerationMessage[] = [
-    { role: "system", content: systemPrompt },
-    // Include prior session messages for multi-turn REPL context
+  // Build initial messages (without system — orchestrator handles it)
+  const sessionMessages: GenerationMessage[] = [
     ...(options.sessionMessages || []),
     { role: "user", content: effectiveTask },
   ]
 
   logger.info("Generating...")
 
-  const allFiles: import("./providers/types").GeneratedFile[] = []
-  let totalTokens = 0
-  let content = ""
-  let followUp: string | undefined
-  let step = 0
+  // Determine if we should use the agentic loop
+  const useAgentic = supportsAgenticLoop(provider)
+  const maxSteps = options.maxSteps ?? (useAgentic ? 20 : 5)
 
-  // --- Multi-step agent loop ---
-  // The agent can chain multiple generation steps. Each step's output
-  // becomes context for the next, enabling complex multi-file generation
-  // where later files depend on earlier ones (e.g., schema → API → UI → tests).
-  while (step < maxSteps) {
-    step++
-    if (step > 1) {
-      logger.info(`Step ${step}/${maxSteps}...`)
-    }
-    debug.step(step, `Starting generation (model: ${resolvedModel || "default"})`)
+  // 7. Run orchestrator (agentic or legacy)
+  const agenticResult = await runAgenticLoop({
+    provider,
+    systemPrompt,
+    messages: [
+      { role: "system", content: systemPrompt },
+      ...sessionMessages,
+    ],
+    providerOptions: { model: resolvedModel, maxTokens: 8192 },
+    cwd,
+    maxIterations: maxSteps,
+    enabledTools: context.config.agentic.enabledTools.filter(
+      (t) => !context.config.agentic.disabledTools.includes(t)
+    ),
+    interactive,
+    overwrite,
+    dryRun,
+    onProgress: (event) => {
+      if (event.type === "iteration_start" && event.iteration > 1) {
+        logger.info(`Step ${event.iteration}/${maxSteps}...`)
+      }
+      if (event.type === "tool_call") {
+        debug.step(0, `Tool: ${event.name}`)
+      }
+    },
+  })
 
-    const result = await provider.generate(messages, {
-      model: resolvedModel,
-      maxTokens: 8192,
-    })
-
-    totalTokens += result.tokensUsed || 0
-    content = result.content
-
-    // Track usage per step
-    const stepTokens = result.tokensUsed || 0
+  // Track token usage
+  if (agenticResult.tokensUsed) {
     const stepModel = resolvedModel || "claude-sonnet-4-20250514"
-    // Estimate input/output split: ~30% input, ~70% output (rough heuristic)
-    const estInput = Math.round(stepTokens * 0.3)
-    const estOutput = stepTokens - estInput
-    globalTracker.recordStep(step, stepModel, estInput, estOutput)
-    debug.api("generate", stepModel, stepTokens)
-    debug.step(step, `Generated ${result.files.length} file(s), ${stepTokens} tokens`)
-
-    // Collect generated files
-    if (result.files.length) {
-      allFiles.push(...result.files)
-    }
-
-    // If the agent asks a follow-up, break and surface to user
-    if (result.followUp) {
-      followUp = result.followUp
-      break
-    }
-
-    // Check if the agent signaled completion (no tool use, or stop_reason is end_turn)
-    // If files were generated and there's no indication of more work, we're done
-    if (result.files.length === 0 && step > 1) {
-      // No more files to generate — agent is done
-      break
-    }
-
-    // For complex tasks, check if the agent wants to continue by looking for
-    // continuation signals in the response content
-    const wantsContinuation =
-      result.content.includes("[CONTINUE]") ||
-      result.content.includes("Next, I'll") ||
-      result.content.includes("Now let me") ||
-      result.content.includes("I'll also generate")
-
-    if (!wantsContinuation) {
-      break
-    }
-
-    // Feed back what was generated so the agent can build on it
-    const filesSummary = result.files
-      .map((f) => `Created: ${f.path}${f.description ? ` — ${f.description}` : ""}`)
-      .join("\n")
-
-    messages.push({
-      role: "assistant",
-      content: result.content + (filesSummary ? `\n\nFiles created:\n${filesSummary}` : ""),
-    })
-
-    messages.push({
-      role: "user",
-      content:
-        "Continue generating the remaining files. Build on what you've already created. When finished, do not include [CONTINUE] in your response.",
-    })
+    const estInput = Math.round(agenticResult.tokensUsed * 0.3)
+    const estOutput = agenticResult.tokensUsed - estInput
+    globalTracker.recordStep(1, stepModel, estInput, estOutput)
   }
 
-  if (step > 1) {
-    logger.info(`Completed in ${step} step(s)`)
+  let { content } = agenticResult
+  const { followUp, tokensUsed: totalTokens } = agenticResult
+
+  if (agenticResult.iterations > 1) {
+    logger.info(`Completed in ${agenticResult.iterations} step(s)`)
   }
 
   // post:response hook — can modify or block the AI response
@@ -296,7 +253,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     }
   }
 
-  // 6. Handle follow-up questions (interactive mode)
+  // Handle follow-up questions (interactive mode)
   if (followUp && interactive) {
     return {
       files: { written: [], skipped: [], errors: [] },
@@ -307,13 +264,13 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     }
   }
 
-  // 7. Deduplicate files (later versions override earlier ones)
+  // Deduplicate files (later versions override earlier ones)
   const deduped = new Map<string, import("./providers/types").GeneratedFile>()
-  for (const file of allFiles) {
+  for (const file of agenticResult.files) {
     deduped.set(file.path, file)
   }
 
-  // 8. Write files
+  // Write files
   const outputDir = resolveOutputDir(outputType, context.techStack, options.outputDir)
 
   const writeResult = await writeGeneratedFiles(Array.from(deduped.values()), {
@@ -323,7 +280,7 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     outputDir,
   })
 
-  // 9. Heal loop — verify generated code and auto-fix if needed
+  // Heal loop — verify generated code and auto-fix if needed
   let healResult: import("@/src/runtime/heal").HealResult | undefined
   if (options.heal !== false && !dryRun && writeResult.written.length > 0) {
     const { HealEngine } = await import("@/src/runtime/heal")
@@ -374,6 +331,9 @@ export type GenerateStreamEvent =
   | StreamEvent
   | { type: "context_ready"; outputType: OutputType }
   | { type: "step_complete"; step: number; filesCount: number }
+  | { type: "tool_call"; name: string; id: string }
+  | { type: "tool_result"; name: string; id: string; is_error?: boolean }
+  | { type: "iteration"; iteration: number }
   | { type: "generate_result"; result: GenerateResult }
 
 export async function* generateStream(
@@ -389,7 +349,6 @@ export async function* generateStream(
     apiKey,
     context7 = true,
     interactive = true,
-    maxSteps = 5,
   } = options
 
   // 0. pre:prompt hook
@@ -450,11 +409,158 @@ export async function* generateStream(
   // 6. Create provider
   const provider = createProvider(providerName, apiKey)
   const resolvedModel = model || loadAuthConfig()?.model
+  const useAgentic = supportsAgenticLoop(provider)
+  const maxSteps = options.maxSteps ?? (useAgentic ? 20 : 5)
+
+  const sessionMessages: GenerationMessage[] = [
+    ...(options.sessionMessages || []),
+    { role: "user", content: effectiveTask },
+  ]
+
+  // For agentic mode, use the orchestrator with progress events
+  if (useAgentic) {
+    const progressEvents: AgenticProgressEvent[] = []
+
+    const agenticResult = await runAgenticLoop({
+      provider,
+      systemPrompt,
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...sessionMessages,
+      ],
+      providerOptions: { model: resolvedModel, maxTokens: 8192 },
+      cwd,
+      maxIterations: maxSteps,
+      enabledTools: context.config.agentic.enabledTools.filter(
+        (t) => !context.config.agentic.disabledTools.includes(t)
+      ),
+      interactive,
+      overwrite,
+      dryRun,
+      onProgress: (event) => {
+        progressEvents.push(event)
+      },
+    })
+
+    // Yield progress events as stream events
+    for (const event of progressEvents) {
+      if (event.type === "text_delta") {
+        yield { type: "text_delta", text: event.text }
+      }
+      if (event.type === "iteration_start") {
+        yield { type: "iteration", iteration: event.iteration }
+      }
+      if (event.type === "tool_call") {
+        yield { type: "tool_call", name: event.name, id: event.id }
+      }
+      if (event.type === "tool_result") {
+        yield { type: "tool_result", name: event.name, id: event.id, is_error: event.is_error }
+      }
+      if (event.type === "files_created") {
+        yield { type: "step_complete", step: 0, filesCount: event.files.length }
+      }
+    }
+
+    yield {
+      type: "done",
+      result: {
+        content: agenticResult.content,
+        files: agenticResult.files,
+        tokensUsed: agenticResult.tokensUsed,
+        followUp: agenticResult.followUp,
+      },
+    }
+
+    // Write files and heal
+    let { content } = agenticResult
+
+    // post:response hook
+    if (globalHooks.has("post:response")) {
+      const responseResult = await globalHooks.execute("post:response", {
+        event: "post:response",
+        content,
+        task: effectiveTask,
+        cwd,
+      })
+      if (responseResult.blocked) {
+        yield { type: "error", error: responseResult.message || "Blocked by post:response hook" }
+        return
+      }
+      if (responseResult.modified?.content) {
+        content = String(responseResult.modified.content)
+      }
+    }
+
+    if (agenticResult.followUp && interactive) {
+      yield {
+        type: "generate_result",
+        result: {
+          files: { written: [], skipped: [], errors: [] },
+          content,
+          outputType,
+          followUp: agenticResult.followUp,
+          tokensUsed: agenticResult.tokensUsed,
+        },
+      }
+      return
+    }
+
+    const deduped = new Map<string, import("./providers/types").GeneratedFile>()
+    for (const file of agenticResult.files) {
+      deduped.set(file.path, file)
+    }
+
+    const outputDir = resolveOutputDir(outputType, context.techStack, options.outputDir)
+    const writeResult = await writeGeneratedFiles(Array.from(deduped.values()), {
+      cwd,
+      overwrite,
+      dryRun,
+      outputDir,
+    })
+
+    let healResult: import("@/src/runtime/heal").HealResult | undefined
+    if (options.heal !== false && !dryRun && writeResult.written.length > 0) {
+      const { HealEngine } = await import("@/src/runtime/heal")
+      const healEngine = new HealEngine(cwd, {
+        enabled: true,
+        testCommand: options.healConfig?.testCommand,
+        buildCommand: options.healConfig?.buildCommand,
+        lintCommand: options.healConfig?.lintCommand,
+        maxAttempts: options.healConfig?.maxAttempts ?? 3,
+        provider: providerName,
+        model: resolvedModel,
+        apiKey,
+      })
+      healResult = await healEngine.detectAndHeal(writeResult.written, effectiveTask)
+    }
+
+    if (globalHooks.has("post:generate")) {
+      await globalHooks.execute("post:generate", {
+        event: "post:generate",
+        task: effectiveTask,
+        content,
+        cwd,
+      })
+    }
+
+    yield {
+      type: "generate_result",
+      result: {
+        files: writeResult,
+        content,
+        outputType,
+        tokensUsed: agenticResult.tokensUsed,
+        healResult,
+      },
+    }
+    return
+  }
+
+  // --- Legacy streaming path (no generateRaw) ---
 
   const messages: GenerationMessage[] = [
     { role: "system", content: systemPrompt },
-    ...(options.sessionMessages || []),
-    { role: "user", content: effectiveTask },
+    ...sessionMessages,
   ]
 
   const allFiles: import("./providers/types").GeneratedFile[] = []
@@ -470,7 +576,6 @@ export async function* generateStream(
   let step1Result: GenerationResult
 
   if (provider.stream) {
-    // Stream step 1 and re-yield events
     let accumulated = ""
     let streamResult: GenerationResult | undefined
 
@@ -494,13 +599,11 @@ export async function* generateStream(
       tokensUsed: 0,
     }
   } else {
-    // No stream method — fall back to blocking generate with synthetic events
     const result = await provider.generate(messages, {
       model: resolvedModel,
       maxTokens: 8192,
     })
 
-    // Yield synthetic stream events
     if (result.content) {
       yield { type: "text_delta", text: result.content }
     }
@@ -511,7 +614,6 @@ export async function* generateStream(
   totalTokens += step1Result.tokensUsed || 0
   content = step1Result.content
 
-  // Track step 1
   const step1Tokens = step1Result.tokensUsed || 0
   const step1Model = resolvedModel || "claude-sonnet-4-20250514"
   const estInput1 = Math.round(step1Tokens * 0.3)
@@ -625,7 +727,6 @@ export async function* generateStream(
     }
   }
 
-  // Handle follow-up questions
   if (followUp && interactive) {
     yield {
       type: "generate_result",
@@ -640,13 +741,11 @@ export async function* generateStream(
     return
   }
 
-  // Deduplicate files
   const deduped = new Map<import("./providers/types").GeneratedFile["path"], import("./providers/types").GeneratedFile>()
   for (const file of allFiles) {
     deduped.set(file.path, file)
   }
 
-  // Write files
   const outputDir = resolveOutputDir(outputType, context.techStack, options.outputDir)
   const writeResult = await writeGeneratedFiles(Array.from(deduped.values()), {
     cwd,
@@ -655,7 +754,6 @@ export async function* generateStream(
     outputDir,
   })
 
-  // Heal loop
   let healResult: import("@/src/runtime/heal").HealResult | undefined
   if (options.heal !== false && !dryRun && writeResult.written.length > 0) {
     const { HealEngine } = await import("@/src/runtime/heal")
@@ -681,7 +779,6 @@ export async function* generateStream(
     }
   }
 
-  // post:generate hook
   if (globalHooks.has("post:generate")) {
     await globalHooks.execute("post:generate", {
       event: "post:generate",
@@ -710,11 +807,24 @@ function buildSystemPrompt(
 ): string {
   const sections: string[] = []
 
-  // Identity
+  // Identity — updated for agentic capabilities
   sections.push(`You are shadxn, an agentic code generation tool. You generate high-quality, production-ready output for any tech stack.
 
 Your primary tool is \`create_files\` — use it to output all generated code, documents, and configs as files.
 If the request is ambiguous or you need critical information to proceed correctly, use \`ask_user\` to ask a clarifying question.
+
+You also have tools to inspect the codebase before generating code:
+- \`read_file\` — read existing files to understand patterns, styles, and implementations
+- \`search_files\` — search for files by glob pattern, optionally grep content with regex
+- \`list_directory\` — explore the project structure
+- \`run_command\` — run shell commands (build, test, lint, etc.)
+- \`edit_file\` — apply targeted search/replace edits to existing files
+
+AGENTIC WORKFLOW:
+- Before generating code, use \`read_file\` and \`search_files\` to understand the existing codebase
+- Match the project's existing patterns, naming conventions, and code style
+- After creating files, consider running tests or build commands to verify correctness
+- Use \`edit_file\` for small, targeted changes instead of rewriting entire files
 
 IMPORTANT RULES:
 - Generate complete, working code — not stubs or placeholders

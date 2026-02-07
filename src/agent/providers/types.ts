@@ -36,6 +36,24 @@ export type StreamEvent =
   | { type: "done"; result: GenerationResult }
   | { type: "error"; error: string }
 
+// --- Raw (agentic) API types ---
+
+export interface AnthropicMessage {
+  role: "user" | "assistant"
+  content: string | ContentBlock[]
+}
+
+export type ContentBlock =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+  | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean }
+
+export interface RawGenerationResult {
+  content: ContentBlock[]
+  stop_reason: "end_turn" | "tool_use" | "max_tokens" | "stop_sequence"
+  usage: { input_tokens: number; output_tokens: number }
+}
+
 export interface AgentProvider {
   name: string
   generate(
@@ -46,6 +64,13 @@ export interface AgentProvider {
     messages: GenerationMessage[],
     options?: ProviderOptions
   ): AsyncIterable<StreamEvent>
+  /** Low-level method returning raw content blocks for the agentic tool_result loop */
+  generateRaw?(
+    messages: AnthropicMessage[],
+    systemPrompt: string,
+    tools: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>,
+    options?: ProviderOptions
+  ): Promise<RawGenerationResult>
 }
 
 // --- Agent configuration ---
@@ -64,6 +89,16 @@ export const agentConfigSchema = z.object({
     .object({
       enabled: z.boolean().default(true),
       apiKey: z.string().optional(),
+    })
+    .default({}),
+  agentic: z
+    .object({
+      maxIterations: z.number().default(20),
+      enabledTools: z.array(z.string()).default([
+        "create_files", "ask_user", "read_file",
+        "search_files", "list_directory", "run_command", "edit_file",
+      ]),
+      disabledTools: z.array(z.string()).default([]),
     })
     .default({}),
 })

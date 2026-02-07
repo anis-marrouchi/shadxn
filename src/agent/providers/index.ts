@@ -38,4 +38,14 @@ export function createProvider(
 
 export { ClaudeProvider } from "./claude"
 export { ClaudeCodeProvider } from "./claude-code"
-export type { AgentProvider, GenerationMessage, GenerationResult, GeneratedFile, ProviderOptions, StreamEvent } from "./types"
+export type {
+  AgentProvider,
+  GenerationMessage,
+  GenerationResult,
+  GeneratedFile,
+  ProviderOptions,
+  StreamEvent,
+  AnthropicMessage,
+  ContentBlock,
+  RawGenerationResult,
+} from "./types"

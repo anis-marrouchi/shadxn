@@ -13,6 +13,7 @@ import { run } from "@/src/commands/run"
 import { model } from "@/src/commands/model"
 import { chat } from "@/src/commands/chat"
 import { git } from "@/src/commands/git"
+import { a2a } from "@/src/commands/a2a"
 import { Command } from "commander"
 import { globalHooks, loadHooks } from "@/src/hooks"
 
@@ -54,6 +55,7 @@ async function main() {
     .addCommand(add)
     .addCommand(diff)
     .addCommand(registry)
+    .addCommand(a2a)
 
   // Default to chat when no command is given and stdin is a TTY
   const args = process.argv.slice(2)

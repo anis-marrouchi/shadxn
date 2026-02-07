@@ -5,32 +5,29 @@ import type {
   GeneratedFile,
   ProviderOptions,
   StreamEvent,
+  AnthropicMessage,
+  RawGenerationResult,
+  ContentBlock,
 } from "./types"
 import { resolveToken } from "@/src/utils/auth-store"
+import { getLegacyTools } from "../tools/definitions"
 
 // --- Claude provider (default) using Anthropic SDK ---
 
 const DEFAULT_MODEL = "claude-sonnet-4-20250514"
 const DEFAULT_MAX_TOKENS = 8192
 
-interface AnthropicMessage {
-  role: "user" | "assistant"
-  content: string | AnthropicContentBlock[]
-}
-
-interface AnthropicContentBlock {
-  type: "text" | "tool_use" | "tool_result"
-  text?: string
-  id?: string
-  name?: string
-  input?: Record<string, unknown>
-  tool_use_id?: string
-  content?: string
-}
-
 interface AnthropicResponse {
   id: string
-  content: AnthropicContentBlock[]
+  content: Array<{
+    type: "text" | "tool_use" | "tool_result"
+    text?: string
+    id?: string
+    name?: string
+    input?: Record<string, unknown>
+    tool_use_id?: string
+    content?: string
+  }>
   model: string
   stop_reason: string
   usage: { input_tokens: number; output_tokens: number }
@@ -78,69 +75,7 @@ export class ClaudeProvider implements AgentProvider {
       model,
       max_tokens: maxTokens,
       messages: conversationMsgs,
-      tools: [
-        {
-          name: "create_files",
-          description:
-            "Create one or more files as output. Use this when the user asks you to generate code, documents, configs, or any file-based output.",
-          input_schema: {
-            type: "object",
-            properties: {
-              files: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    path: {
-                      type: "string",
-                      description:
-                        "Relative file path from project root (e.g., src/components/Button.tsx)",
-                    },
-                    content: {
-                      type: "string",
-                      description: "The full content of the file",
-                    },
-                    language: {
-                      type: "string",
-                      description: "Programming language or file type",
-                    },
-                    description: {
-                      type: "string",
-                      description: "Brief description of what this file does",
-                    },
-                  },
-                  required: ["path", "content"],
-                },
-              },
-              summary: {
-                type: "string",
-                description: "Brief summary of all generated files",
-              },
-            },
-            required: ["files"],
-          },
-        },
-        {
-          name: "ask_user",
-          description:
-            "Ask the user a clarifying question when you need more information to proceed. Use this when the request is ambiguous or you need to confirm important decisions.",
-          input_schema: {
-            type: "object",
-            properties: {
-              question: {
-                type: "string",
-                description: "The question to ask the user",
-              },
-              options: {
-                type: "array",
-                items: { type: "string" },
-                description: "Optional list of choices for the user",
-              },
-            },
-            required: ["question"],
-          },
-        },
-      ],
+      tools: getLegacyTools(),
     }
 
     if (systemMsg) {
@@ -154,6 +89,52 @@ export class ClaudeProvider implements AgentProvider {
     const response = await this.callApi(body)
 
     return this.parseResponse(response)
+  }
+
+  async generateRaw(
+    messages: AnthropicMessage[],
+    systemPrompt: string,
+    tools: Array<{ name: string; description: string; input_schema: Record<string, unknown> }>,
+    options?: ProviderOptions
+  ): Promise<RawGenerationResult> {
+    const model = options?.model || DEFAULT_MODEL
+    const maxTokens = options?.maxTokens || DEFAULT_MAX_TOKENS
+
+    const body: Record<string, unknown> = {
+      model,
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages,
+      tools,
+    }
+
+    if (options?.temperature !== undefined) {
+      body.temperature = options.temperature
+    }
+
+    const response = await this.callApi(body)
+
+    // Map response content blocks to our ContentBlock type
+    const content: ContentBlock[] = response.content.map((block) => {
+      if (block.type === "text") {
+        return { type: "text" as const, text: block.text || "" }
+      }
+      if (block.type === "tool_use") {
+        return {
+          type: "tool_use" as const,
+          id: block.id || "",
+          name: block.name || "",
+          input: block.input || {},
+        }
+      }
+      return { type: "text" as const, text: "" }
+    })
+
+    return {
+      content,
+      stop_reason: response.stop_reason as RawGenerationResult["stop_reason"],
+      usage: response.usage,
+    }
   }
 
   async *stream(
@@ -176,64 +157,14 @@ export class ClaudeProvider implements AgentProvider {
       max_tokens: maxTokens,
       messages: conversationMsgs,
       stream: true,
-      tools: [
-        {
-          name: "create_files",
-          description: "Create one or more files as output.",
-          input_schema: {
-            type: "object",
-            properties: {
-              files: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: {
-                    path: { type: "string" },
-                    content: { type: "string" },
-                    language: { type: "string" },
-                    description: { type: "string" },
-                  },
-                  required: ["path", "content"],
-                },
-              },
-              summary: { type: "string" },
-            },
-            required: ["files"],
-          },
-        },
-        {
-          name: "ask_user",
-          description: "Ask the user a clarifying question.",
-          input_schema: {
-            type: "object",
-            properties: {
-              question: { type: "string" },
-              options: { type: "array", items: { type: "string" } },
-            },
-            required: ["question"],
-          },
-        },
-      ],
+      tools: getLegacyTools(),
     }
 
     if (systemMsg) {
       body.system = systemMsg.content
     }
 
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "anthropic-version": "2023-06-01",
-    }
-
-    if (this.authType === "oauth") {
-      headers["Authorization"] = `Bearer ${this.apiKey}`
-      headers["anthropic-beta"] = "claude-code-20250219,oauth-2025-04-20"
-      headers["user-agent"] = "claude-cli/2.1.2 (external, cli)"
-      headers["x-app"] = "cli"
-      headers["anthropic-dangerous-direct-browser-access"] = "true"
-    } else {
-      headers["x-api-key"] = this.apiKey
-    }
+    const headers = this.buildHeaders()
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -325,7 +256,7 @@ export class ClaudeProvider implements AgentProvider {
     }
   }
 
-  private async callApi(body: Record<string, unknown>): Promise<AnthropicResponse> {
+  private buildHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "anthropic-version": "2023-06-01",
@@ -340,6 +271,12 @@ export class ClaudeProvider implements AgentProvider {
     } else {
       headers["x-api-key"] = this.apiKey
     }
+
+    return headers
+  }
+
+  private async callApi(body: Record<string, unknown>): Promise<AnthropicResponse> {
+    const headers = this.buildHeaders()
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
