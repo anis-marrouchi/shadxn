@@ -61,7 +61,7 @@ export class MemoryHierarchy {
    * Record a generation at project level (task-specific).
    */
   async recordGeneration(
-    entry: Omit<MemoryEntry, "id" | "timestamp" | "type">
+    entry: Omit<MemoryEntry, "id" | "timestamp" | "type"> & { type?: MemoryEntry["type"] }
   ): Promise<string> {
     return this.projectMemory.recordGeneration(entry)
   }

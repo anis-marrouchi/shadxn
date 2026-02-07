@@ -5,10 +5,15 @@ import { logger } from "@/src/utils/logger"
 import { createAgentContext } from "@/src/agent"
 import { createProvider, type ProviderName } from "@/src/agent/providers"
 import { ensureCredentials } from "@/src/commands/model"
+import { loadAuthConfig } from "@/src/utils/auth-store"
 import type { GenerationMessage, GeneratedFile } from "@/src/agent/providers/types"
 import { formatTechStack } from "@/src/agent/context/tech-stack"
 import { formatSchemas } from "@/src/agent/context/schema"
 import { matchSkillsToTask } from "@/src/agent/skills/loader"
+import { globalHooks } from "@/src/hooks"
+import { globalPermissions, type PermissionMode } from "@/src/permissions"
+import { globalTracker, debug, setDebug } from "@/src/observability"
+import { MemoryHierarchy } from "@/src/memory"
 import chalk from "chalk"
 import { Command } from "commander"
 import ora from "ora"
@@ -53,6 +58,12 @@ export const evolve = new Command()
   .option("--no-context7", "disable Context7 doc lookup")
   .option("-y, --yes", "apply all changes without confirmation", false)
   .option("--dry-run", "show proposed changes without writing", false)
+  .option("--debug", "enable debug mode with verbose logging", false)
+  .option("--mode <mode>", "permission mode (default, acceptEdits, plan, yolo)")
+  .option("--heal", "verify generated code and auto-fix errors")
+  .option("--no-heal", "skip verification after applying changes")
+  .option("--test-cmd <cmd>", "test command for heal verification")
+  .option("--build-cmd <cmd>", "build command for heal verification")
   .action(async (taskParts, opts) => {
     try {
       let task = taskParts?.length ? taskParts.join(" ") : undefined
@@ -61,6 +72,14 @@ export const evolve = new Command()
       if (!existsSync(cwd)) {
         logger.error(`The path ${cwd} does not exist.`)
         process.exit(1)
+      }
+
+      // Debug/mode init
+      if (opts.debug) {
+        setDebug(true)
+      }
+      if (opts.mode) {
+        globalPermissions.setMode(opts.mode as PermissionMode)
       }
 
       // Interactive task input
@@ -76,6 +95,36 @@ export const evolve = new Command()
           process.exit(0)
         }
         task = response.task
+      }
+
+      // pre:prompt hook — can modify or block the task
+      let effectiveTask = task!
+      if (globalHooks.has("pre:prompt")) {
+        const promptResult = await globalHooks.execute("pre:prompt", {
+          event: "pre:prompt",
+          task: effectiveTask,
+          cwd,
+        })
+        if (promptResult.blocked) {
+          logger.error(promptResult.message || "Blocked by pre:prompt hook")
+          process.exit(1)
+        }
+        if (promptResult.modified?.task) {
+          effectiveTask = String(promptResult.modified.task)
+        }
+      }
+
+      // pre:generate hook — can block the entire generation
+      if (globalHooks.has("pre:generate")) {
+        const genResult = await globalHooks.execute("pre:generate", {
+          event: "pre:generate",
+          task: effectiveTask,
+          cwd,
+        })
+        if (genResult.blocked) {
+          logger.error(genResult.message || "Blocked by pre:generate hook")
+          process.exit(1)
+        }
       }
 
       // Get glob pattern
@@ -123,7 +172,7 @@ export const evolve = new Command()
       }
 
       logger.break()
-      logger.info(`Task: ${chalk.bold(task)}`)
+      logger.info(`Task: ${chalk.bold(effectiveTask)}`)
       logger.info(`Files: ${chalk.bold(String(filesToProcess.length))} matching ${chalk.dim(globPattern)}`)
       logger.break()
 
@@ -138,17 +187,20 @@ export const evolve = new Command()
       }
 
       // Gather agent context
-      const context = await createAgentContext(cwd, task!, {
+      const context = await createAgentContext(cwd, effectiveTask, {
         provider: opts.provider,
         context7: { enabled: opts.context7 !== false },
       })
 
       // Match skills
-      const matchedSkills = matchSkillsToTask(context.skills, task!, undefined)
+      const matchedSkills = matchSkillsToTask(context.skills, effectiveTask, undefined)
+      if (matchedSkills.length) {
+        debug.context("skills", `${matchedSkills.length} matched for evolve`)
+      }
 
       spinner.text = "Generating transformations..."
 
-      // Build the evolve prompt
+      // Build the evolve prompt (now includes memory and project instructions)
       const systemPrompt = buildEvolveSystemPrompt(context, matchedSkills.map((m) => m.skill))
 
       const filesSummary = fileContents
@@ -159,7 +211,7 @@ export const evolve = new Command()
         .join("\n\n")
 
       const userMessage = `# Transformation Task
-${task}
+${effectiveTask}
 
 # Files to Transform
 ${filesSummary}
@@ -174,16 +226,28 @@ Transform these files according to the task. For each file that needs changes, u
       }
 
       // Generate with provider
-      const provider = createProvider(opts.provider as ProviderName, opts.apiKey)
+      const providerName = opts.provider as ProviderName
+      const provider = createProvider(providerName, opts.apiKey)
+      const resolvedModel = opts.model || loadAuthConfig()?.model
       const messages: GenerationMessage[] = [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
       ]
 
+      debug.step(1, `Starting evolve generation (model: ${resolvedModel || "default"})`)
+
       const result = await provider.generate(messages, {
-        model: opts.model,
+        model: resolvedModel,
         maxTokens: 16384,
       })
+
+      // Track usage
+      const stepTokens = result.tokensUsed || 0
+      const stepModel = resolvedModel || "claude-sonnet-4-20250514"
+      const estInput = Math.round(stepTokens * 0.3)
+      const estOutput = stepTokens - estInput
+      globalTracker.recordStep(1, stepModel, estInput, estOutput)
+      debug.api("evolve", stepModel, stepTokens)
 
       spinner.stop()
 
@@ -305,13 +369,39 @@ Transform these files according to the task. For each file that needs changes, u
 
       let written = 0
       let errors = 0
+      const writtenFiles: string[] = []
+
       for (const change of approved) {
+        // Permissions-aware file writing
+        if (globalHooks.has("pre:file-write")) {
+          const writeResult = await globalHooks.execute("pre:file-write", {
+            event: "pre:file-write",
+            file: change.path,
+            fileContent: change.proposed,
+            cwd,
+          })
+          if (writeResult.blocked) {
+            logger.warn(`Skipped ${change.path}: ${writeResult.message || "blocked by hook"}`)
+            continue
+          }
+        }
+
         try {
           const fullPath = path.resolve(cwd, change.path)
           const dir = path.dirname(fullPath)
           await fs.mkdir(dir, { recursive: true })
           await fs.writeFile(fullPath, change.proposed, "utf8")
           written++
+          writtenFiles.push(change.path)
+
+          // post:file-write hook
+          if (globalHooks.has("post:file-write")) {
+            await globalHooks.execute("post:file-write", {
+              event: "post:file-write",
+              file: change.path,
+              cwd,
+            })
+          }
         } catch (error: any) {
           logger.error(`Failed to write ${change.path}: ${error.message}`)
           errors++
@@ -323,15 +413,87 @@ Transform these files according to the task. For each file that needs changes, u
       logger.break()
       logger.success(`Applied ${written} change(s):`)
       for (const change of approved) {
-        console.log(`  ${chalk.green("~")} ${change.path}`)
+        if (writtenFiles.includes(change.path)) {
+          console.log(`  ${chalk.green("~")} ${change.path}`)
+        }
       }
       if (errors) {
         logger.error(`${errors} file(s) failed to write.`)
       }
 
+      // Record in memory
+      try {
+        const memory = new MemoryHierarchy(cwd)
+        await memory.load()
+        await memory.recordGeneration({
+          type: "evolution",
+          task: effectiveTask,
+          files: writtenFiles,
+          success: errors === 0,
+          error: errors > 0 ? `${errors} file(s) failed to write` : undefined,
+          context: {
+            techStack: context.techStack.languages.map(String),
+            frameworks: context.techStack.frameworks.map(String),
+            skillsUsed: matchedSkills.map((m) => m.skill.frontmatter.name),
+          },
+        })
+      } catch {
+        // Memory recording is non-critical
+      }
+
+      // Heal loop — verify and auto-fix if requested
+      if (opts.heal !== false && writtenFiles.length > 0) {
+        const { HealEngine } = await import("@/src/runtime/heal")
+        const healEngine = new HealEngine(cwd, {
+          enabled: true,
+          testCommand: opts.testCmd,
+          buildCommand: opts.buildCmd,
+          maxAttempts: 3,
+          provider: providerName,
+          model: resolvedModel,
+          apiKey: opts.apiKey,
+        })
+
+        const healSpinner = ora("Verifying changes...").start()
+        const healResult = await healEngine.detectAndHeal(writtenFiles, effectiveTask)
+        healSpinner.stop()
+
+        if (healResult.healed) {
+          if (healResult.attempts === 0) {
+            logger.success("Verification passed — changes are clean")
+          } else {
+            logger.success(
+              `Auto-healed in ${healResult.attempts} attempt(s)` +
+              (healResult.filesChanged.length ? ` (fixed: ${healResult.filesChanged.join(", ")})` : "")
+            )
+          }
+        } else if (healResult.error) {
+          logger.error(`Verification failed after ${healResult.attempts} attempt(s):`)
+          console.log(chalk.dim(`  ${healResult.error.split("\n").slice(0, 3).join("\n  ")}`))
+
+          await globalHooks.execute("on:error", {
+            event: "on:error",
+            error: new Error(healResult.error),
+            task: effectiveTask,
+            cwd,
+          })
+        }
+      }
+
+      // post:generate hook
+      if (globalHooks.has("post:generate")) {
+        await globalHooks.execute("post:generate", {
+          event: "post:generate",
+          task: effectiveTask,
+          content: result.content,
+          cwd,
+        })
+      }
+
       if (result.tokensUsed) {
         logger.break()
-        logger.info(`Tokens used: ${result.tokensUsed}`)
+        const summary = globalTracker.getSummary()
+        logger.info(`Tokens used: ${result.tokensUsed} ($${summary.totalCost.toFixed(4)})`)
       }
     } catch (error) {
       handleError(error)
@@ -382,6 +544,16 @@ CRITICAL RULES:
 
   if (context.docs) {
     sections.push(context.docs)
+  }
+
+  // Project instructions (SHADXN.md / CLAUDE.md)
+  if (context.projectInstructions) {
+    sections.push(`# Project Instructions\n${context.projectInstructions}`)
+  }
+
+  // Memory context (past generations, patterns, preferences)
+  if (context.memoryContext) {
+    sections.push(context.memoryContext)
   }
 
   return sections.join("\n\n")

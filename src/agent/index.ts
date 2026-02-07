@@ -1,4 +1,4 @@
-import type { AgentProvider, GenerationMessage, GenerationResult, OutputType } from "./providers/types"
+import type { AgentProvider, GenerationMessage, GenerationResult, OutputType, StreamEvent } from "./providers/types"
 import { agentConfigSchema, type AgentConfig } from "./providers/types"
 import { createProvider, type ProviderName } from "./providers"
 import { loadAuthConfig } from "@/src/utils/auth-store"
@@ -43,6 +43,13 @@ export interface GenerateOptions {
   skills?: string[] // Additional skill packages to load
   maxSteps?: number // Max agentic loop iterations (default 5)
   sessionMessages?: GenerationMessage[] // Multi-turn context from REPL sessions
+  heal?: boolean // undefined = auto (heal if files written), false = skip
+  healConfig?: {
+    testCommand?: string
+    buildCommand?: string
+    lintCommand?: string
+    maxAttempts?: number
+  }
 }
 
 export interface GenerateResult {
@@ -51,6 +58,7 @@ export interface GenerateResult {
   outputType: OutputType
   followUp?: string
   tokensUsed?: number
+  healResult?: import("@/src/runtime/heal").HealResult
 }
 
 export async function createAgentContext(
@@ -315,6 +323,32 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     outputDir,
   })
 
+  // 9. Heal loop — verify generated code and auto-fix if needed
+  let healResult: import("@/src/runtime/heal").HealResult | undefined
+  if (options.heal !== false && !dryRun && writeResult.written.length > 0) {
+    const { HealEngine } = await import("@/src/runtime/heal")
+    const healEngine = new HealEngine(cwd, {
+      enabled: true,
+      testCommand: options.healConfig?.testCommand,
+      buildCommand: options.healConfig?.buildCommand,
+      lintCommand: options.healConfig?.lintCommand,
+      maxAttempts: options.healConfig?.maxAttempts ?? 3,
+      provider: providerName,
+      model: resolvedModel,
+      apiKey,
+    })
+    healResult = await healEngine.detectAndHeal(writeResult.written, effectiveTask)
+
+    if (!healResult.healed && healResult.error) {
+      await globalHooks.execute("on:error", {
+        event: "on:error",
+        error: new Error(healResult.error),
+        task: effectiveTask,
+        cwd,
+      })
+    }
+  }
+
   // post:generate hook — post-processing (format, lint, etc.)
   if (globalHooks.has("post:generate")) {
     await globalHooks.execute("post:generate", {
@@ -330,6 +364,342 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
     content,
     outputType,
     tokensUsed: totalTokens,
+    healResult,
+  }
+}
+
+// --- Streaming generation ---
+
+export type GenerateStreamEvent =
+  | StreamEvent
+  | { type: "context_ready"; outputType: OutputType }
+  | { type: "step_complete"; step: number; filesCount: number }
+  | { type: "generate_result"; result: GenerateResult }
+
+export async function* generateStream(
+  options: GenerateOptions
+): AsyncGenerator<GenerateStreamEvent> {
+  const {
+    task,
+    cwd,
+    overwrite = false,
+    dryRun = false,
+    provider: providerName = "claude-code",
+    model,
+    apiKey,
+    context7 = true,
+    interactive = true,
+    maxSteps = 5,
+  } = options
+
+  // 0. pre:prompt hook
+  let effectiveTask = task
+  if (globalHooks.has("pre:prompt")) {
+    const promptResult = await globalHooks.execute("pre:prompt", {
+      event: "pre:prompt",
+      task,
+      cwd,
+    })
+    if (promptResult.blocked) {
+      yield { type: "error", error: promptResult.message || "Blocked by pre:prompt hook" }
+      return
+    }
+    if (promptResult.modified?.task) {
+      effectiveTask = String(promptResult.modified.task)
+    }
+  }
+
+  // 0b. pre:generate hook
+  if (globalHooks.has("pre:generate")) {
+    const genResult = await globalHooks.execute("pre:generate", {
+      event: "pre:generate",
+      task: effectiveTask,
+      cwd,
+    })
+    if (genResult.blocked) {
+      yield { type: "error", error: genResult.message || "Blocked by pre:generate hook" }
+      return
+    }
+  }
+
+  // 1. Gather context
+  const context = await createAgentContext(cwd, effectiveTask, {
+    provider: providerName,
+    context7: { enabled: context7, apiKey },
+  })
+
+  // 2. Resolve output type
+  const outputType = resolveOutputType(options.outputType, effectiveTask)
+
+  // Signal context ready so UI can stop spinner
+  yield { type: "context_ready", outputType }
+
+  // 3. Match relevant skills
+  const matchedSkills = matchSkillsToTask(context.skills, effectiveTask, outputType)
+
+  // 4. Build system prompt
+  const systemPrompt = buildSystemPrompt(context, outputType, matchedSkills.map((m) => m.skill))
+
+  // 5. Ensure credentials
+  const hasCredentials = await ensureCredentials(apiKey)
+  if (!hasCredentials) {
+    yield { type: "error", error: "No credentials configured. Run `shadxn model` to set up." }
+    return
+  }
+
+  // 6. Create provider
+  const provider = createProvider(providerName, apiKey)
+  const resolvedModel = model || loadAuthConfig()?.model
+
+  const messages: GenerationMessage[] = [
+    { role: "system", content: systemPrompt },
+    ...(options.sessionMessages || []),
+    { role: "user", content: effectiveTask },
+  ]
+
+  const allFiles: import("./providers/types").GeneratedFile[] = []
+  let totalTokens = 0
+  let content = ""
+  let followUp: string | undefined
+  let step = 0
+
+  // --- Step 1: streamed ---
+  step++
+  debug.step(step, `Starting generation (model: ${resolvedModel || "default"})`)
+
+  let step1Result: GenerationResult
+
+  if (provider.stream) {
+    // Stream step 1 and re-yield events
+    let accumulated = ""
+    let streamResult: GenerationResult | undefined
+
+    for await (const event of provider.stream(messages, {
+      model: resolvedModel,
+      maxTokens: 8192,
+    })) {
+      yield event
+
+      if (event.type === "text_delta") {
+        accumulated += event.text
+      }
+      if (event.type === "done") {
+        streamResult = event.result
+      }
+    }
+
+    step1Result = streamResult || {
+      content: accumulated,
+      files: [],
+      tokensUsed: 0,
+    }
+  } else {
+    // No stream method — fall back to blocking generate with synthetic events
+    const result = await provider.generate(messages, {
+      model: resolvedModel,
+      maxTokens: 8192,
+    })
+
+    // Yield synthetic stream events
+    if (result.content) {
+      yield { type: "text_delta", text: result.content }
+    }
+    yield { type: "done", result }
+    step1Result = result
+  }
+
+  totalTokens += step1Result.tokensUsed || 0
+  content = step1Result.content
+
+  // Track step 1
+  const step1Tokens = step1Result.tokensUsed || 0
+  const step1Model = resolvedModel || "claude-sonnet-4-20250514"
+  const estInput1 = Math.round(step1Tokens * 0.3)
+  const estOutput1 = step1Tokens - estInput1
+  globalTracker.recordStep(step, step1Model, estInput1, estOutput1)
+  debug.api("generate", step1Model, step1Tokens)
+  debug.step(step, `Generated ${step1Result.files.length} file(s), ${step1Tokens} tokens`)
+
+  if (step1Result.files.length) {
+    allFiles.push(...step1Result.files)
+  }
+
+  if (step1Result.followUp) {
+    followUp = step1Result.followUp
+  }
+
+  yield { type: "step_complete", step, filesCount: step1Result.files.length }
+
+  // --- Steps 2-N: non-streaming continuation loop ---
+  if (!followUp) {
+    const wantsContinuation1 =
+      content.includes("[CONTINUE]") ||
+      content.includes("Next, I'll") ||
+      content.includes("Now let me") ||
+      content.includes("I'll also generate")
+
+    if (wantsContinuation1 && step1Result.files.length > 0) {
+      const filesSummary = step1Result.files
+        .map((f) => `Created: ${f.path}${f.description ? ` — ${f.description}` : ""}`)
+        .join("\n")
+      messages.push({
+        role: "assistant",
+        content: content + (filesSummary ? `\n\nFiles created:\n${filesSummary}` : ""),
+      })
+      messages.push({
+        role: "user",
+        content:
+          "Continue generating the remaining files. Build on what you've already created. When finished, do not include [CONTINUE] in your response.",
+      })
+
+      while (step < maxSteps) {
+        step++
+        debug.step(step, `Starting generation (model: ${resolvedModel || "default"})`)
+
+        const result = await provider.generate(messages, {
+          model: resolvedModel,
+          maxTokens: 8192,
+        })
+
+        totalTokens += result.tokensUsed || 0
+        content = result.content
+
+        const stepTokens = result.tokensUsed || 0
+        const stepModel = resolvedModel || "claude-sonnet-4-20250514"
+        const estInput = Math.round(stepTokens * 0.3)
+        const estOutput = stepTokens - estInput
+        globalTracker.recordStep(step, stepModel, estInput, estOutput)
+        debug.api("generate", stepModel, stepTokens)
+        debug.step(step, `Generated ${result.files.length} file(s), ${stepTokens} tokens`)
+
+        if (result.files.length) {
+          allFiles.push(...result.files)
+        }
+
+        yield { type: "step_complete", step, filesCount: result.files.length }
+
+        if (result.followUp) {
+          followUp = result.followUp
+          break
+        }
+        if (result.files.length === 0 && step > 1) break
+
+        const wantsContinuation =
+          result.content.includes("[CONTINUE]") ||
+          result.content.includes("Next, I'll") ||
+          result.content.includes("Now let me") ||
+          result.content.includes("I'll also generate")
+
+        if (!wantsContinuation) break
+
+        const filesSummary2 = result.files
+          .map((f) => `Created: ${f.path}${f.description ? ` — ${f.description}` : ""}`)
+          .join("\n")
+        messages.push({
+          role: "assistant",
+          content: result.content + (filesSummary2 ? `\n\nFiles created:\n${filesSummary2}` : ""),
+        })
+        messages.push({
+          role: "user",
+          content:
+            "Continue generating the remaining files. Build on what you've already created. When finished, do not include [CONTINUE] in your response.",
+        })
+      }
+    }
+  }
+
+  // post:response hook
+  if (globalHooks.has("post:response")) {
+    const responseResult = await globalHooks.execute("post:response", {
+      event: "post:response",
+      content,
+      task: effectiveTask,
+      cwd,
+    })
+    if (responseResult.blocked) {
+      yield { type: "error", error: responseResult.message || "Blocked by post:response hook" }
+      return
+    }
+    if (responseResult.modified?.content) {
+      content = String(responseResult.modified.content)
+    }
+  }
+
+  // Handle follow-up questions
+  if (followUp && interactive) {
+    yield {
+      type: "generate_result",
+      result: {
+        files: { written: [], skipped: [], errors: [] },
+        content,
+        outputType,
+        followUp,
+        tokensUsed: totalTokens,
+      },
+    }
+    return
+  }
+
+  // Deduplicate files
+  const deduped = new Map<import("./providers/types").GeneratedFile["path"], import("./providers/types").GeneratedFile>()
+  for (const file of allFiles) {
+    deduped.set(file.path, file)
+  }
+
+  // Write files
+  const outputDir = resolveOutputDir(outputType, context.techStack, options.outputDir)
+  const writeResult = await writeGeneratedFiles(Array.from(deduped.values()), {
+    cwd,
+    overwrite,
+    dryRun,
+    outputDir,
+  })
+
+  // Heal loop
+  let healResult: import("@/src/runtime/heal").HealResult | undefined
+  if (options.heal !== false && !dryRun && writeResult.written.length > 0) {
+    const { HealEngine } = await import("@/src/runtime/heal")
+    const healEngine = new HealEngine(cwd, {
+      enabled: true,
+      testCommand: options.healConfig?.testCommand,
+      buildCommand: options.healConfig?.buildCommand,
+      lintCommand: options.healConfig?.lintCommand,
+      maxAttempts: options.healConfig?.maxAttempts ?? 3,
+      provider: providerName,
+      model: resolvedModel,
+      apiKey,
+    })
+    healResult = await healEngine.detectAndHeal(writeResult.written, effectiveTask)
+
+    if (!healResult.healed && healResult.error) {
+      await globalHooks.execute("on:error", {
+        event: "on:error",
+        error: new Error(healResult.error),
+        task: effectiveTask,
+        cwd,
+      })
+    }
+  }
+
+  // post:generate hook
+  if (globalHooks.has("post:generate")) {
+    await globalHooks.execute("post:generate", {
+      event: "post:generate",
+      task: effectiveTask,
+      content,
+      cwd,
+    })
+  }
+
+  yield {
+    type: "generate_result",
+    result: {
+      files: writeResult,
+      content,
+      outputType,
+      tokensUsed: totalTokens,
+      healResult,
+    },
   }
 }
 
@@ -415,4 +785,4 @@ For complex tasks that require multiple related files (e.g., schema + API + UI +
 export type { TechStack } from "./context/tech-stack"
 export type { ProjectSchemas } from "./context/schema"
 export type { Skill } from "./skills/types"
-export type { AgentConfig, OutputType, GeneratedFile } from "./providers/types"
+export type { AgentConfig, OutputType, GeneratedFile, StreamEvent } from "./providers/types"

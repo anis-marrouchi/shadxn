@@ -4,8 +4,8 @@ import ora from "ora"
 import type { Session } from "./session"
 import { createSession, saveSession, loadSession, loadLatestSession } from "./session"
 import { isCommand, parseCommand, getCommand, type CommandContext } from "./commands"
-import { renderBanner, renderResponse, renderFiles, renderCost, renderPlan } from "./renderer"
-import { generate, type GenerateOptions } from "@/src/agent"
+import { renderBanner, renderResponse, renderFiles, renderCost, renderPlan, renderStreamChunk } from "./renderer"
+import { generateStream, type GenerateOptions, type GenerateStreamEvent } from "@/src/agent"
 import type { GenerationMessage } from "@/src/agent/providers/types"
 import { logger } from "@/src/utils/logger"
 import { globalPermissions } from "@/src/permissions"
@@ -157,6 +157,7 @@ export class ReplEngine {
 
   /**
    * Handle a natural language generation prompt.
+   * Uses streaming to render text in real-time instead of blocking with a spinner.
    */
   private async handleGeneration(input: string): Promise<void> {
     const spinner = ora({
@@ -183,14 +184,44 @@ export class ReplEngine {
         sessionMessages,
       }
 
-      const result = await generate(generateOptions)
+      let result: import("@/src/agent").GenerateResult | undefined
+      let streaming = false
 
-      spinner.stop()
-
-      // Render the response
-      if (result.content) {
-        renderResponse(result.content)
+      for await (const event of generateStream(generateOptions)) {
+        if (event.type === "context_ready") {
+          spinner.stop()
+          console.log()
+          streaming = true
+          continue
+        }
+        if (event.type === "text_delta") {
+          renderStreamChunk(event.text)
+          continue
+        }
+        if (event.type === "done") {
+          console.log()
+          continue
+        }
+        if (event.type === "error") {
+          throw new Error(event.error)
+        }
+        if (event.type === "step_complete") {
+          if (event.step > 1) {
+            console.log(chalk.dim(`  Step ${event.step}: ${event.filesCount} file(s)`))
+          }
+          continue
+        }
+        if (event.type === "generate_result") {
+          result = event.result
+        }
       }
+
+      // Ensure spinner is stopped if streaming never started
+      if (!streaming) {
+        spinner.stop()
+      }
+
+      if (!result) return
 
       // Render file results (plan mode shows preview instead)
       if (result.files.written.length || result.files.skipped.length || result.files.errors.length) {
@@ -219,6 +250,17 @@ export class ReplEngine {
       if (result.followUp) {
         console.log()
         console.log(chalk.yellow(`  ${result.followUp}`))
+      }
+
+      // Display heal results if present
+      if (result.healResult) {
+        console.log()
+        if (result.healResult.healed) {
+          console.log(chalk.green(`  Heal: passed verification${result.healResult.attempts > 0 ? ` (fixed in ${result.healResult.attempts} attempt(s))` : ""}`))
+        } else if (result.healResult.error) {
+          console.log(chalk.red(`  Heal: verification failed after ${result.healResult.attempts} attempt(s)`))
+          console.log(chalk.dim(`  ${result.healResult.error.split("\n")[0]}`))
+        }
       }
     } catch (error: any) {
       spinner.stop()

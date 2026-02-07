@@ -104,12 +104,14 @@ export class Memory {
 
   // --- Record events ---
 
-  async recordGeneration(entry: Omit<MemoryEntry, "id" | "timestamp" | "type">): Promise<string> {
+  async recordGeneration(
+    entry: Omit<MemoryEntry, "id" | "timestamp" | "type"> & { type?: MemoryEntry["type"] }
+  ): Promise<string> {
     const id = generateId()
     this.store.entries.push({
       id,
       timestamp: Date.now(),
-      type: "generation",
+      type: entry.type || "generation",
       ...entry,
     })
     this.store.stats.totalGenerations++

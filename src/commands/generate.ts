@@ -61,6 +61,10 @@ export const gen = new Command()
   .option("-y, --yes", "skip confirmation prompts", false)
   .option("--debug", "enable debug mode with verbose logging", false)
   .option("--mode <mode>", "permission mode (default, acceptEdits, plan, yolo)", "yolo")
+  .option("--heal", "verify generated code and auto-fix errors")
+  .option("--no-heal", "skip verification after generation")
+  .option("--test-cmd <cmd>", "test command for heal verification")
+  .option("--build-cmd <cmd>", "build command for heal verification")
   .action(async (taskParts, opts) => {
     try {
       let task = taskParts?.length ? taskParts.join(" ") : opts.task
@@ -150,6 +154,11 @@ export const gen = new Command()
         context7: !options.noContext7,
         interactive: !options.yes,
         maxSteps: parseInt(opts.maxSteps || "5", 10),
+        heal: opts.heal,
+        healConfig: (opts.testCmd || opts.buildCmd) ? {
+          testCommand: opts.testCmd,
+          buildCommand: opts.buildCmd,
+        } : undefined,
       })
 
       spinner.stop()
@@ -221,6 +230,24 @@ function printResult(result: any) {
     logger.error(`Failed ${result.files.errors.length} file(s):`)
     for (const err of result.files.errors) {
       console.log(`  ${chalk.red("x")} ${err}`)
+    }
+  }
+
+  // Display heal results
+  if (result.healResult) {
+    logger.break()
+    if (result.healResult.healed) {
+      if (result.healResult.attempts === 0) {
+        logger.success("Verification passed — generated code is clean")
+      } else {
+        logger.success(
+          `Auto-healed in ${result.healResult.attempts} attempt(s)` +
+          (result.healResult.filesChanged?.length ? ` (fixed: ${result.healResult.filesChanged.join(", ")})` : "")
+        )
+      }
+    } else if (result.healResult.error) {
+      logger.error(`Verification failed after ${result.healResult.attempts} attempt(s):`)
+      console.log(chalk.dim(`  ${result.healResult.error.split("\n").slice(0, 3).join("\n  ")}`))
     }
   }
 

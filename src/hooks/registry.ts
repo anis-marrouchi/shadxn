@@ -3,6 +3,7 @@ import type { HookEvent, HookDefinition, HookContext, HookResult, HookHandler } 
 import { BLOCKING_EVENTS } from "./types"
 import { logger } from "@/src/utils/logger"
 import { debug } from "@/src/observability"
+import { loadAuthConfig, resolveToken } from "@/src/utils/auth-store"
 
 // --- Hook Registry: registration, priority ordering, execution ---
 
@@ -171,15 +172,87 @@ export class HookRegistry {
   }
 
   /**
-   * Prompt hook: placeholder for single-turn LLM calls.
-   * In Phase 1, this logs a warning — full implementation in Phase 2.
+   * Prompt hook: single-turn LLM call that can block or modify the operation.
+   * The prompt template supports {{variable}} interpolation from hook context.
+   * The LLM must respond with JSON: { "action": "allow"|"block", "message": "...", "modified": {...} }
    */
   private createPromptHandler(definition: HookDefinition): HookHandler {
-    return async (_context: HookContext): Promise<HookResult> => {
-      logger.warn(
-        `Prompt hook "${definition.name}" registered but prompt hooks require a provider. Skipping.`
-      )
-      return {}
+    return async (context: HookContext): Promise<HookResult> => {
+      if (!definition.prompt) {
+        return {}
+      }
+
+      // Check credentials are available (don't prompt interactively)
+      const providerName = definition.provider || loadAuthConfig()?.provider || "claude-code"
+      const resolved = resolveToken()
+      if (!resolved && providerName !== "claude-code") {
+        logger.warn(
+          `Prompt hook "${definition.name}" skipped: no credentials available for provider "${providerName}"`
+        )
+        return {}
+      }
+
+      try {
+        // Lazy import to avoid circular deps
+        const { createProvider } = await import("@/src/agent/providers")
+        const provider = createProvider(providerName as any, resolved?.token)
+
+        // Interpolate {{variable}} placeholders in the prompt template
+        let prompt = definition.prompt
+        prompt = prompt.replace(/\{\{(\w+)\}\}/g, (_match, key) => {
+          return String(context[key] ?? "")
+        })
+
+        const systemPrompt = `You are a hook validator for shadxn. Analyze the following context and respond with ONLY a JSON object (no markdown, no code fences).
+
+Response format:
+{"action": "allow", "message": "optional explanation"}
+OR
+{"action": "block", "message": "reason for blocking"}
+OR
+{"action": "allow", "message": "optional", "modified": {"key": "new value"}}
+
+The "modified" field is optional and can contain updated values to pass forward.`
+
+        const result = await provider.generate(
+          [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt },
+          ],
+          {
+            model: definition.model,
+            maxTokens: 1024,
+          }
+        )
+
+        // Parse the LLM response as JSON
+        const content = result.content.trim()
+        // Try to extract JSON from the response (handle markdown fences)
+        const jsonMatch = content.match(/\{[\s\S]*\}/)
+        if (!jsonMatch) {
+          logger.warn(`Prompt hook "${definition.name}": LLM response was not valid JSON, allowing`)
+          return {}
+        }
+
+        const parsed = JSON.parse(jsonMatch[0])
+
+        if (parsed.action === "block") {
+          return {
+            blocked: true,
+            message: parsed.message || `Blocked by prompt hook: ${definition.name}`,
+          }
+        }
+
+        if (parsed.modified) {
+          return { modified: parsed.modified }
+        }
+
+        return {}
+      } catch (error: any) {
+        // Don't block on hook failures — log and continue
+        logger.warn(`Prompt hook "${definition.name}" failed: ${error.message}`)
+        return {}
+      }
     }
   }
 }
