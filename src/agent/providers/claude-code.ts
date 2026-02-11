@@ -328,6 +328,14 @@ export class ClaudeCodeProvider implements AgentProvider {
     })
 
     let fullContent = ""
+    let stderr = ""
+    let fatalError: string | undefined
+
+    if (child.stderr) {
+      child.stderr.on("data", (chunk: any) => {
+        stderr += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk)
+      })
+    }
 
     if (child.stdout) {
       const decoder = new TextDecoder()
@@ -340,6 +348,15 @@ export class ClaudeCodeProvider implements AgentProvider {
         for (const line of lines) {
           try {
             const event = JSON.parse(line)
+            // Some claude stream-json builds emit error events.
+            if (event.type === "error") {
+              fatalError = String(event.error || event.message || "Claude CLI error")
+              continue
+            }
+            if (event.is_error && (event.result || event.message)) {
+              fatalError = String(event.result || event.message)
+              continue
+            }
             if (event.type === "assistant" && event.message) {
               fullContent += event.message
               yield { type: "text_delta", text: event.message }
@@ -355,12 +372,22 @@ export class ClaudeCodeProvider implements AgentProvider {
       }
     }
 
-    await child
+    const res = await child
+    if (res.exitCode !== 0 && !fatalError) {
+      fatalError = (stderr || res.stderr || res.stdout || "Claude CLI failed").toString().trim()
+    }
+
+    if (fatalError) {
+      yield { type: "error", error: `Claude CLI error: ${fatalError}` }
+      return
+    }
 
     const files = this.extractFilesFromText(fullContent)
+    const followUp =
+      files.length === 0 ? this.inferFollowUpFromText(fullContent) : undefined
     yield {
       type: "done",
-      result: { content: fullContent, files, tokensUsed: 0 },
+      result: { content: fullContent, files, followUp, tokensUsed: 0 },
     }
   }
 
@@ -414,6 +441,9 @@ export class ClaudeCodeProvider implements AgentProvider {
     let buffer = ""
     let content = ""
     let tokensUsed = 0
+    const files: GeneratedFile[] = []
+    let followUp: string | undefined
+    let activeTool: { name: string; id: string; json: string } | null = null
 
     try {
       while (true) {
@@ -431,9 +461,80 @@ export class ClaudeCodeProvider implements AgentProvider {
 
           try {
             const event = JSON.parse(data)
+            if (event.type === "content_block_start") {
+              if (event.content_block?.type === "tool_use") {
+                // Finalize any previous tool block if the stream didn't send a stop.
+                if (activeTool) {
+                  yield { type: "tool_use_end", name: activeTool.name }
+                  try {
+                    const input = JSON.parse(activeTool.json || "{}") as any
+                    if (activeTool.name === "create_files" && input) {
+                      if (Array.isArray(input.files)) {
+                        files.push(...(input.files as GeneratedFile[]))
+                      }
+                      if (typeof input.summary === "string" && input.summary.trim()) {
+                        content += `\n${input.summary}`
+                      }
+                    }
+                    if (activeTool.name === "ask_user" && input) {
+                      if (typeof input.question === "string" && input.question.trim()) {
+                        followUp = input.question
+                        if (Array.isArray(input.options) && input.options.length) {
+                          followUp += `\nOptions: ${input.options.join(", ")}`
+                        }
+                      }
+                    }
+                  } catch {
+                    // Ignore invalid tool JSON
+                  } finally {
+                    activeTool = null
+                  }
+                }
+
+                activeTool = {
+                  name: event.content_block.name,
+                  id: event.content_block.id,
+                  json: "",
+                }
+                yield { type: "tool_use_start", name: activeTool.name, id: activeTool.id }
+              }
+            }
+
             if (event.type === "content_block_delta" && event.delta?.type === "text_delta") {
               content += event.delta.text
               yield { type: "text_delta", text: event.delta.text }
+            }
+            if (event.type === "content_block_delta" && event.delta?.type === "input_json_delta") {
+              if (activeTool) activeTool.json += event.delta.partial_json || ""
+              yield { type: "tool_use_delta", json: event.delta.partial_json }
+            }
+            if (event.type === "content_block_stop") {
+              if (activeTool) {
+                yield { type: "tool_use_end", name: activeTool.name }
+                try {
+                  const input = JSON.parse(activeTool.json || "{}") as any
+                  if (activeTool.name === "create_files" && input) {
+                    if (Array.isArray(input.files)) {
+                      files.push(...(input.files as GeneratedFile[]))
+                    }
+                    if (typeof input.summary === "string" && input.summary.trim()) {
+                      content += `\n${input.summary}`
+                    }
+                  }
+                  if (activeTool.name === "ask_user" && input) {
+                    if (typeof input.question === "string" && input.question.trim()) {
+                      followUp = input.question
+                      if (Array.isArray(input.options) && input.options.length) {
+                        followUp += `\nOptions: ${input.options.join(", ")}`
+                      }
+                    }
+                  }
+                } catch {
+                  // Ignore invalid tool JSON
+                } finally {
+                  activeTool = null
+                }
+              }
             }
             if (event.type === "message_delta" && event.usage) {
               tokensUsed = (event.usage.input_tokens || 0) + (event.usage.output_tokens || 0)
@@ -447,10 +548,43 @@ export class ClaudeCodeProvider implements AgentProvider {
       reader.releaseLock()
     }
 
-    const files = this.extractFilesFromText(content)
+    // Flush any trailing tool input.
+    if (activeTool) {
+      yield { type: "tool_use_end", name: activeTool.name }
+      try {
+        const input = JSON.parse(activeTool.json || "{}") as any
+        if (activeTool.name === "create_files" && input) {
+          if (Array.isArray(input.files)) {
+            files.push(...(input.files as GeneratedFile[]))
+          }
+          if (typeof input.summary === "string" && input.summary.trim()) {
+            content += `\n${input.summary}`
+          }
+        }
+        if (activeTool.name === "ask_user" && input) {
+          if (typeof input.question === "string" && input.question.trim()) {
+            followUp = input.question
+            if (Array.isArray(input.options) && input.options.length) {
+              followUp += `\nOptions: ${input.options.join(", ")}`
+            }
+          }
+        }
+      } catch {
+        // Ignore
+      }
+      activeTool = null
+    }
+
+    // If the model didn't use tools (or we couldn't parse them), fall back to fenced-code extraction.
+    if (files.length === 0) {
+      files.push(...this.extractFilesFromText(content))
+    }
+    if (!followUp && files.length === 0) {
+      followUp = this.inferFollowUpFromText(content)
+    }
     yield {
       type: "done",
-      result: { content, files, tokensUsed },
+      result: { content, files, followUp, tokensUsed },
     }
   }
 
@@ -463,9 +597,11 @@ export class ClaudeCodeProvider implements AgentProvider {
       parsed = JSON.parse(stdout)
     } catch {
       // CLI returned plain text
+      const inferred = this.inferFollowUpFromText(stdout.trim())
       return {
         content: stdout.trim(),
         files: [],
+        followUp: inferred,
         tokensUsed: 0,
       }
     }
@@ -475,10 +611,12 @@ export class ClaudeCodeProvider implements AgentProvider {
 
     // Extract files from the text if it contains code blocks with file paths
     const files = this.extractFilesFromText(text)
+    const followUp = files.length === 0 ? this.inferFollowUpFromText(text) : undefined
 
     return {
       content: text,
       files,
+      followUp,
       tokensUsed: parsed.usage
         ? (parsed.usage.input_tokens || 0) + (parsed.usage.output_tokens || 0)
         : 0,
@@ -502,6 +640,78 @@ export class ClaudeCodeProvider implements AgentProvider {
       }
     }
     return files
+  }
+
+  /**
+   * Claude CLI (OAuth/subscription) doesn't always emit structured ask_user tool blocks.
+   * When it's obviously asking for clarification, infer a follow-up question from the tail.
+   */
+  private inferFollowUpFromText(text: string): string | undefined {
+    const cleaned = (text || "").trim()
+    if (!cleaned) return undefined
+
+    // If it looks like it produced file blocks, don't treat it as a follow-up.
+    if (cleaned.includes("```")) return undefined
+
+    const lines = cleaned.replace(/\r\n/g, "\n").split("\n")
+    const tail = lines.slice(Math.max(0, lines.length - 20))
+
+    const tailText = tail.join("\n")
+    const looksLikePlanApproval =
+      /\b(plan|proposal)\b/i.test(tailText) &&
+      /(ready for your review|review (the )?plan|requesting plan approval|awaiting approval|waiting for (your )?approval|approve (the )?plan|approval to proceed)/i.test(
+        tailText
+      )
+
+    if (looksLikePlanApproval) {
+      return (
+        "The provider is requesting plan approval.\n" +
+        "Reply with:\n" +
+        "- approve\n" +
+        "- revise: <what to change>\n" +
+        "- cancel"
+      )
+    }
+
+    const isIntro = (l: string) =>
+      /^(question|clarification|clarify|i need|need more|before i proceed|to proceed|please (confirm|clarify)|which|what|where|when|how|do you)/i.test(
+        l.trim()
+      )
+
+    // Find the last strong candidate line.
+    let startIdx = -1
+    for (let i = tail.length - 1; i >= 0; i--) {
+      const l = tail[i].trim()
+      if (!l) continue
+      if (isIntro(l) || l.includes("?")) {
+        startIdx = i
+        break
+      }
+    }
+    if (startIdx === -1) return undefined
+
+    // Collect the question + a small option/list block that follows it.
+    const out: string[] = []
+    for (let i = startIdx; i < tail.length && out.length < 8; i++) {
+      const l = tail[i]
+      const t = l.trim()
+      if (out.length > 0 && !t) break
+
+      if (
+        out.length > 0 &&
+        !/^(options?:|[-*]\s|\d+[\).]\s)/i.test(t) &&
+        !t.includes("?")
+      ) {
+        break
+      }
+
+      out.push(l.trimEnd())
+    }
+
+    const candidate = out.join("\n").trim()
+    if (candidate.length < 5) return undefined
+    if (candidate.length > 800) return candidate.slice(0, 800).trimEnd()
+    return candidate
   }
 
   /**

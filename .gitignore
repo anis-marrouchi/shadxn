@@ -4,3 +4,8 @@ dist
 node_modules/
 test
 .DS_store
+output
+.shadxn
+.saga
+.pnpm-store
+.claude

@@ -16,6 +16,7 @@ import { debug } from "@/src/observability"
 import { MemoryHierarchy, ContextBuilder, loadProjectInstructions } from "@/src/memory"
 import type { Skill } from "./skills/types"
 import { runAgenticLoop, supportsAgenticLoop, type AgenticProgressEvent } from "./orchestrator"
+import { AsyncQueue } from "@/src/utils/async-queue"
 
 // --- Agent Orchestrator: the brain that coordinates everything ---
 
@@ -419,46 +420,66 @@ export async function* generateStream(
 
   // For agentic mode, use the orchestrator with progress events
   if (useAgentic) {
-    const progressEvents: AgenticProgressEvent[] = []
+    const q = new AsyncQueue<GenerateStreamEvent>()
+    let agenticResult: Awaited<ReturnType<typeof runAgenticLoop>> | undefined
+    let agenticError: unknown
 
-    const agenticResult = await runAgenticLoop({
-      provider,
-      systemPrompt,
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...sessionMessages,
-      ],
-      providerOptions: { model: resolvedModel, maxTokens: 8192 },
-      cwd,
-      maxIterations: maxSteps,
-      enabledTools: context.config.agentic.enabledTools.filter(
-        (t) => !context.config.agentic.disabledTools.includes(t)
-      ),
-      interactive,
-      overwrite,
-      dryRun,
-      onProgress: (event) => {
-        progressEvents.push(event)
-      },
-    })
+    const agenticPromise = (async () => {
+      try {
+        agenticResult = await runAgenticLoop({
+          provider,
+          systemPrompt,
+          messages: [
+            { role: "system", content: systemPrompt },
+            ...sessionMessages,
+          ],
+          providerOptions: { model: resolvedModel, maxTokens: 8192 },
+          cwd,
+          maxIterations: maxSteps,
+          enabledTools: context.config.agentic.enabledTools.filter(
+            (t) => !context.config.agentic.disabledTools.includes(t)
+          ),
+          interactive,
+          overwrite,
+          dryRun,
+          onProgress: (event) => {
+            if (event.type === "text_delta") {
+              q.push({ type: "text_delta", text: event.text })
+            }
+            if (event.type === "iteration_start") {
+              q.push({ type: "iteration", iteration: event.iteration })
+            }
+            if (event.type === "tool_call") {
+              q.push({ type: "tool_call", name: event.name, id: event.id })
+            }
+            if (event.type === "tool_result") {
+              q.push({ type: "tool_result", name: event.name, id: event.id, is_error: event.is_error })
+            }
+            if (event.type === "files_created") {
+              q.push({ type: "step_complete", step: 0, filesCount: event.files.length })
+            }
+          },
+        })
+      } catch (err) {
+        agenticError = err
+      } finally {
+        q.close()
+      }
+    })()
 
-    // Yield progress events as stream events
-    for (const event of progressEvents) {
-      if (event.type === "text_delta") {
-        yield { type: "text_delta", text: event.text }
-      }
-      if (event.type === "iteration_start") {
-        yield { type: "iteration", iteration: event.iteration }
-      }
-      if (event.type === "tool_call") {
-        yield { type: "tool_call", name: event.name, id: event.id }
-      }
-      if (event.type === "tool_result") {
-        yield { type: "tool_result", name: event.name, id: event.id, is_error: event.is_error }
-      }
-      if (event.type === "files_created") {
-        yield { type: "step_complete", step: 0, filesCount: event.files.length }
-      }
+    for await (const evt of q) {
+      yield evt
+    }
+
+    await agenticPromise
+    if (agenticError) {
+      const msg = agenticError instanceof Error ? agenticError.message : String(agenticError)
+      yield { type: "error", error: msg }
+      return
+    }
+    if (!agenticResult) {
+      yield { type: "error", error: "Agentic loop failed without a result" }
+      return
     }
 
     yield {

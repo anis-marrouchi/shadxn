@@ -190,6 +190,69 @@ export class ClaudeProvider implements AgentProvider {
     let content = ""
     let followUp: string | undefined
     let tokensUsed = 0
+    let activeTool: { name: string; id: string; json: string } | null = null
+
+    const inferFollowUpFromText = (text: string): string | undefined => {
+      const cleaned = (text || "").trim()
+      if (!cleaned) return undefined
+      if (cleaned.includes("```")) return undefined
+
+      const lines = cleaned.replace(/\r\n/g, "\n").split("\n")
+      const tail = lines.slice(Math.max(0, lines.length - 20))
+      const tailText = tail.join("\n")
+
+      const looksLikePlanApproval =
+        /\b(plan|proposal)\b/i.test(tailText) &&
+        /(ready for your review|review (the )?plan|requesting plan approval|awaiting approval|waiting for (your )?approval|approve (the )?plan|approval to proceed)/i.test(
+          tailText
+        )
+
+      if (looksLikePlanApproval) {
+        return (
+          "The provider is requesting plan approval.\n" +
+          "Reply with:\n" +
+          "- approve\n" +
+          "- revise: <what to change>\n" +
+          "- cancel"
+        )
+      }
+
+      const isIntro = (l: string) =>
+        /^(question|clarification|clarify|i need|need more|before i proceed|to proceed|please (confirm|clarify)|which|what|where|when|how|do you)/i.test(
+          l.trim()
+        )
+
+      let startIdx = -1
+      for (let i = tail.length - 1; i >= 0; i--) {
+        const l = tail[i].trim()
+        if (!l) continue
+        if (isIntro(l) || l.includes("?")) {
+          startIdx = i
+          break
+        }
+      }
+      if (startIdx === -1) return undefined
+
+      const out: string[] = []
+      for (let i = startIdx; i < tail.length && out.length < 8; i++) {
+        const l = tail[i]
+        const t = l.trim()
+        if (out.length > 0 && !t) break
+        if (
+          out.length > 0 &&
+          !/^(options?:|[-*]\s|\d+[\).]\s)/i.test(t) &&
+          !t.includes("?")
+        ) {
+          break
+        }
+        out.push(l.trimEnd())
+      }
+
+      const candidate = out.join("\n").trim()
+      if (candidate.length < 5) return undefined
+      if (candidate.length > 800) return candidate.slice(0, 800).trimEnd()
+      return candidate
+    }
 
     try {
       while (true) {
@@ -210,6 +273,39 @@ export class ClaudeProvider implements AgentProvider {
 
             if (event.type === "content_block_start") {
               if (event.content_block?.type === "tool_use") {
+                // Finalize any previous tool block if the stream didn't send a stop.
+                if (activeTool) {
+                  yield { type: "tool_use_end", name: activeTool.name }
+                  try {
+                    const input = JSON.parse(activeTool.json || "{}") as any
+                    if (activeTool.name === "create_files" && input) {
+                      if (Array.isArray(input.files)) {
+                        files.push(...(input.files as GeneratedFile[]))
+                      }
+                      if (typeof input.summary === "string" && input.summary.trim()) {
+                        content += `\n${input.summary}`
+                      }
+                    }
+                    if (activeTool.name === "ask_user" && input) {
+                      if (typeof input.question === "string" && input.question.trim()) {
+                        followUp = input.question
+                        if (Array.isArray(input.options) && input.options.length) {
+                          followUp += `\nOptions: ${input.options.join(", ")}`
+                        }
+                      }
+                    }
+                  } catch {
+                    // Ignore invalid tool JSON
+                  } finally {
+                    activeTool = null
+                  }
+                }
+
+                activeTool = {
+                  name: event.content_block.name,
+                  id: event.content_block.id,
+                  json: "",
+                }
                 yield {
                   type: "tool_use_start",
                   name: event.content_block.name,
@@ -224,12 +320,40 @@ export class ClaudeProvider implements AgentProvider {
                 yield { type: "text_delta", text: event.delta.text }
               }
               if (event.delta?.type === "input_json_delta") {
+                if (activeTool) activeTool.json += event.delta.partial_json || ""
                 yield { type: "tool_use_delta", json: event.delta.partial_json }
               }
             }
 
             if (event.type === "content_block_stop") {
               // Tool use blocks are complete
+              if (activeTool) {
+                // Manually inline finalize to avoid generator gymnastics.
+                yield { type: "tool_use_end", name: activeTool.name }
+                try {
+                  const input = JSON.parse(activeTool.json || "{}") as any
+                  if (activeTool.name === "create_files" && input) {
+                    if (Array.isArray(input.files)) {
+                      files.push(...(input.files as GeneratedFile[]))
+                    }
+                    if (typeof input.summary === "string" && input.summary.trim()) {
+                      content += `\n${input.summary}`
+                    }
+                  }
+                  if (activeTool.name === "ask_user" && input) {
+                    if (typeof input.question === "string" && input.question.trim()) {
+                      followUp = input.question
+                      if (Array.isArray(input.options) && input.options.length) {
+                        followUp += `\nOptions: ${input.options.join(", ")}`
+                      }
+                    }
+                  }
+                } catch {
+                  // Ignore invalid tool JSON
+                } finally {
+                  activeTool = null
+                }
+              }
             }
 
             if (event.type === "message_delta") {
@@ -248,6 +372,37 @@ export class ClaudeProvider implements AgentProvider {
       }
     } finally {
       reader.releaseLock()
+    }
+
+    // Flush any trailing tool input.
+    if (activeTool) {
+      yield { type: "tool_use_end", name: activeTool.name }
+      try {
+        const input = JSON.parse(activeTool.json || "{}") as any
+        if (activeTool.name === "create_files" && input) {
+          if (Array.isArray(input.files)) {
+            files.push(...(input.files as GeneratedFile[]))
+          }
+          if (typeof input.summary === "string" && input.summary.trim()) {
+            content += `\n${input.summary}`
+          }
+        }
+        if (activeTool.name === "ask_user" && input) {
+          if (typeof input.question === "string" && input.question.trim()) {
+            followUp = input.question
+            if (Array.isArray(input.options) && input.options.length) {
+              followUp += `\nOptions: ${input.options.join(", ")}`
+            }
+          }
+        }
+      } catch {
+        // Ignore
+      }
+      activeTool = null
+    }
+
+    if (!followUp && files.length === 0) {
+      followUp = inferFollowUpFromText(content)
     }
 
     yield {

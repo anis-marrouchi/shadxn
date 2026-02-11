@@ -2,7 +2,7 @@ import { existsSync } from "fs"
 import path from "path"
 import { handleError } from "@/src/utils/handle-error"
 import { logger } from "@/src/utils/logger"
-import { generate } from "@/src/agent"
+import { generateStream } from "@/src/agent"
 import { OUTPUT_TYPES, outputTypeDescriptions } from "@/src/agent/providers/types"
 import chalk from "chalk"
 import { Command } from "commander"
@@ -12,6 +12,8 @@ import { z } from "zod"
 import { setDebug } from "@/src/observability"
 import { globalTracker } from "@/src/observability"
 import { globalPermissions, type PermissionMode } from "@/src/permissions"
+import { GenerateTui } from "@/src/utils/generate-tui"
+import { renderMarkdownForTerminal } from "@/src/utils/render-markdown"
 
 const generateOptionsSchema = z.object({
   task: z.string().optional(),
@@ -60,6 +62,7 @@ export const gen = new Command()
   )
   .option("-y, --yes", "skip confirmation prompts", false)
   .option("--debug", "enable debug mode with verbose logging", false)
+  .option("--no-tui", "disable interactive TUI output")
   .option("--mode <mode>", "permission mode (default, acceptEdits, plan, yolo)", "yolo")
   .option("--heal", "verify generated code and auto-fix errors")
   .option("--no-heal", "skip verification after generation")
@@ -127,21 +130,46 @@ export const gen = new Command()
         noContext7: !opts.context7,
       })
 
-      // Show what we're about to do
-      logger.break()
-      logger.info(`Task: ${chalk.bold(task)}`)
-      logger.info(`Provider: ${chalk.bold(options.provider)}`)
-      if (options.type !== "auto") {
-        logger.info(`Type: ${chalk.bold(options.type)}`)
-      }
-      if (options.dryRun) {
-        logger.warn("Dry run mode — no files will be written")
-      }
-      logger.break()
+      const maxSteps = parseInt(opts.maxSteps || "5", 10)
+      const useTui = Boolean(opts.tui) && Boolean(process.stdout.isTTY) && !Boolean(opts.debug)
+      const spinner = (!useTui && !opts.debug) ? ora("Waiting for provider...").start() : undefined
 
-      const spinner = ora("Analyzing project and generating...").start()
+      const tui = useTui
+        ? new GenerateTui({
+          task,
+          provider: options.provider,
+          model: options.model,
+          cwd,
+          outputDir: options.output,
+          outputType: options.type,
+          maxSteps,
+          overwrite: options.overwrite,
+          dryRun: options.dryRun,
+        })
+        : undefined
 
-      const result = await generate({
+      if (!useTui) {
+        // Show what we're about to do (plain logs).
+        logger.break()
+        logger.info(`Task: ${chalk.bold(task)}`)
+        logger.info(`Provider: ${chalk.bold(options.provider)}`)
+        if (options.type !== "auto") {
+          logger.info(`Type: ${chalk.bold(options.type)}`)
+        }
+        if (options.output) {
+          logger.info(`Output: ${chalk.bold(options.output)}`)
+        }
+        if (options.dryRun) {
+          logger.warn("Dry run mode — no files will be written")
+        }
+        logger.break()
+      }
+
+      tui?.start()
+
+      let result: any | undefined
+      let streamError: string | undefined
+      for await (const event of generateStream({
         task,
         outputType: options.type as any,
         outputDir: options.output,
@@ -153,22 +181,64 @@ export const gen = new Command()
         cwd,
         context7: !options.noContext7,
         interactive: !options.yes,
-        maxSteps: parseInt(opts.maxSteps || "5", 10),
+        maxSteps,
         heal: opts.heal,
         healConfig: (opts.testCmd || opts.buildCmd) ? {
           testCommand: opts.testCmd,
           buildCommand: opts.buildCmd,
         } : undefined,
-      })
+      })) {
+        tui?.onEvent(event as any)
 
-      spinner.stop()
+        if (!useTui) {
+          if (event.type === "context_ready") {
+            if (spinner) spinner.text = "Generating..."
+          }
+          if (event.type === "context_ready") {
+            logger.info("Analyzing project... done")
+            logger.info(`Output type: ${event.outputType}`)
+          } else if (event.type === "iteration") {
+            logger.info(`Step ${event.iteration}/${maxSteps}...`)
+          } else if (event.type === "tool_call") {
+            logger.info(`Tool: ${event.name}`)
+          } else if (event.type === "tool_result") {
+            logger.info(`Tool result: ${event.name}${event.is_error ? " (error)" : ""}`)
+          } else if (event.type === "error") {
+            logger.error(event.error)
+          }
+        }
+
+        if (event.type === "generate_result") {
+          result = event.result
+        }
+        if (event.type === "error") {
+          streamError = event.error
+        }
+      }
+
+      spinner?.stop()
+      tui?.stop()
+      if (streamError) {
+        throw new Error(streamError)
+      }
+      if (!result) {
+        throw new Error("Generation finished without a result")
+      }
 
       // Handle follow-up questions
       if (result.followUp) {
+        // Ensure the terminal is back to normal before prompting.
         logger.break()
         logger.info(chalk.yellow("The agent needs more information:"))
         logger.break()
-        console.log(result.followUp)
+        if (result.content) {
+          const rendered = process.stdout.isTTY
+            ? renderMarkdownForTerminal(result.content)
+            : result.content
+          console.log(rendered)
+          logger.break()
+        }
+        console.log(process.stdout.isTTY ? renderMarkdownForTerminal(result.followUp) : result.followUp)
         logger.break()
 
         const { answer } = await prompts({
@@ -178,10 +248,31 @@ export const gen = new Command()
         })
 
         if (answer) {
-          // Re-run with the additional context
-          const spinner2 = ora("Generating with additional context...").start()
-          const result2 = await generate({
-            task: `${task}\n\nAdditional context: ${answer}`,
+          const task2 =
+            `${task}\n\n` +
+            `Previous agent output (for context):\n${result.content || ""}\n\n` +
+            `User response: ${answer}\n\n` +
+            `If the above was a plan awaiting approval and the user approved, proceed to implementation now using create_files (do not ask for approval again).`
+          const tui2 = useTui
+            ? new GenerateTui({
+              task: task2,
+              provider: options.provider,
+              model: options.model,
+              cwd,
+              outputDir: options.output,
+              outputType: options.type,
+              maxSteps,
+              overwrite: options.overwrite,
+              dryRun: options.dryRun,
+            })
+            : undefined
+
+          tui2?.start()
+
+          let result2: any | undefined
+          let streamError2: string | undefined
+          for await (const event of generateStream({
+            task: task2,
             outputType: options.type as any,
             outputDir: options.output,
             overwrite: options.overwrite,
@@ -192,8 +283,21 @@ export const gen = new Command()
             cwd,
             context7: !options.noContext7,
             interactive: false,
-          })
-          spinner2.stop()
+            maxSteps,
+            heal: opts.heal,
+            healConfig: (opts.testCmd || opts.buildCmd) ? {
+              testCommand: opts.testCmd,
+              buildCommand: opts.buildCmd,
+            } : undefined,
+          })) {
+            tui2?.onEvent(event as any)
+            if (event.type === "generate_result") result2 = event.result
+            if (event.type === "error") streamError2 = event.error
+          }
+
+          tui2?.stop()
+          if (streamError2) throw new Error(streamError2)
+          if (!result2) throw new Error("Generation finished without a result")
           printResult(result2)
         }
       } else {
@@ -208,7 +312,10 @@ function printResult(result: any) {
   logger.break()
 
   if (result.content) {
-    console.log(result.content)
+    const rendered = process.stdout.isTTY
+      ? renderMarkdownForTerminal(result.content)
+      : result.content
+    console.log(rendered)
     logger.break()
   }
 
