@@ -2,7 +2,7 @@ import type { AgentProvider, GenerationMessage, GenerationResult, OutputType, St
 import { agentConfigSchema, type AgentConfig } from "./providers/types"
 import { createProvider, type ProviderName } from "./providers"
 import { loadAuthConfig } from "@/src/utils/auth-store"
-import { ensureCredentials } from "@/src/commands/model"
+import { ensureCredentials } from "@/src/utils/auth-store"
 import { detectTechStack, formatTechStack, type TechStack } from "./context/tech-stack"
 import { detectSchemas, formatSchemas, type ProjectSchemas } from "./context/schema"
 import { gatherContext7Docs } from "./context/context7"
