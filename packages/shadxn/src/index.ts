@@ -52,5 +52,6 @@ export {
   TAILWIND_CONFIG_TS_WITH_VARIABLES,
 } from "./utils/templates"
 
-// Re-export agentx for convenience
-export { logger, handleError } from "agentx"
+// Logger and error handling
+export { logger } from "./utils/logger"
+export { handleError } from "./utils/handle-error"

@@ -90,9 +90,6 @@ importers:
       '@babel/plugin-transform-typescript':
         specifier: ^7.22.5
         version: 7.28.6(@babel/core@7.29.0)
-      agentx:
-        specifier: workspace:*
-        version: link:../agentx
       chalk:
         specifier: 5.2.0
         version: 5.2.0

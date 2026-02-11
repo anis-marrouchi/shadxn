@@ -9,5 +9,4 @@ export default defineConfig({
   minify: true,
   target: "esnext",
   outDir: "dist",
-  external: ["agentx"],
 })

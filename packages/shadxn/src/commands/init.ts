@@ -12,8 +12,8 @@ import {
 } from "@/utils/get-config"
 import { getPackageManager } from "@/utils/get-package-manager"
 import { getProjectConfig, preFlight } from "@/utils/get-project-info"
-import { handleError } from "agentx"
-import { logger } from "agentx"
+import { handleError } from "@/utils/handle-error"
+import { logger } from "@/utils/logger"
 import {
   getRegistryBaseColor,
   getRegistryBaseColors,

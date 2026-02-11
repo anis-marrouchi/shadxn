@@ -1,13 +1,13 @@
 // @ts-nocheck
 import { Command } from "commander";
-import { logger } from "agentx";
+import { logger } from "@/utils/logger";
 import * as fsx from "fs-extra";
 import * as fs from "fs";
 import path from "path";
 import template from "lodash.template";
 import { rimraf } from "rimraf";
 import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { handleError } from "agentx";
+import { handleError } from "@/utils/handle-error";
 import { z } from "zod";
 import prompts from "prompts";
 import { registrySchema, types } from "@/utils/registry/schema";

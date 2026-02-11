@@ -2,8 +2,8 @@ import { existsSync, promises as fs } from "fs";
 import path from "path";
 import { getConfig } from "@/utils/get-config";
 import { getPackageManager } from "@/utils/get-package-manager";
-import { handleError } from "agentx";
-import { logger } from "agentx";
+import { handleError } from "@/utils/handle-error";
+import { logger } from "@/utils/logger";
 import {
   fetchTree,
   getItemTargetPath,
