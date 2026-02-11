@@ -1,0 +1,73 @@
+{
+  "name": "agentx",
+  "version": "0.1.0",
+  "description": "General-purpose agentic code generation engine — CLI + library for AI-powered file generation, evolution, and code management",
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "anis_marrouchi",
+    "url": "https://twitter.com/anis_marrouchi"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anis-marrouchi/shadxn.git",
+    "directory": "packages/agentx"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "agentx": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "ai",
+    "agent",
+    "skills",
+    "generation",
+    "claude",
+    "code-generation",
+    "agentic",
+    "context7",
+    "skills.sh"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "chalk": "5.2.0",
+    "commander": "^10.0.0",
+    "cosmiconfig": "^8.1.3",
+    "execa": "^7.0.0",
+    "fast-glob": "^3.3.2",
+    "fs-extra": "^11.2.0",
+    "node-fetch": "^3.3.0",
+    "ora": "^6.1.2",
+    "prompts": "^2.4.2",
+    "zod": "^3.20.2"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.1",
+    "@types/prompts": "^2.4.2",
+    "rimraf": "^4.1.3",
+    "tsup": "^6.6.3",
+    "type-fest": "^3.8.0",
+    "typescript": "^4.9.3",
+    "vite-tsconfig-paths": "^4.3.1",
+    "vitest": "^1.2.2"
+  }
+}
