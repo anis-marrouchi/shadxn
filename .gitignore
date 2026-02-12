@@ -1,9 +1,7 @@
 components
 dist
-.turbo
 node_modules/
-test
-.DS_store
+.DS_Store
 output
 .shadxn
 .saga

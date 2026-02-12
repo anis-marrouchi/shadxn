@@ -1,11 +1,25 @@
 {
-  "name": "shadxn-monorepo",
-  "private": true,
-  "description": "Monorepo for agentx (agentic code generation) and shadxn (AI-powered design system tool)",
+  "name": "shadxn",
+  "version": "0.1.0",
+  "description": "AI-powered design system tool — component registry, AST transforms, and styling for any tech stack",
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "MIT",
   "author": {
     "name": "anis_marrouchi",
     "url": "https://twitter.com/anis_marrouchi"
+  },
+  "acknowledgments": {
+    "codeFrom": {
+      "project": "Shadcn UI",
+      "author": {
+        "name": "Shadcn",
+        "url": "https://twitter.com/shadcn"
+      },
+      "license": "MIT",
+      "url": "https://github.com/shadcn-ui/ui"
+    }
   },
   "repository": {
     "type": "git",
@@ -13,18 +27,73 @@
   },
   "type": "module",
   "packageManager": "pnpm@10.28.2",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "shadxn": "./dist/cli.js",
+    "shadxn-ui": "./dist/cli.js",
+    "shadxn-cli": "./dist/cli.js",
+    "ui": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "src/registries"
+  ],
+  "keywords": [
+    "ui",
+    "tailwind",
+    "shadcn",
+    "shadxn",
+    "components",
+    "design-system"
+  ],
   "scripts": {
-    "build": "turbo run build",
-    "dev": "turbo run dev",
-    "test": "turbo run test",
-    "typecheck": "turbo run typecheck",
-    "clean": "turbo run clean",
-    "format:write": "prettier --write \"packages/*/src/**/*.{ts,tsx,mdx}\" --cache",
-    "format:check": "prettier --check \"packages/*/src/**/*.{ts,tsx,mdx}\" --cache"
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist",
+    "format:write": "prettier --write \"src/**/*.{ts,tsx,mdx}\" --cache",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,mdx}\" --cache"
+  },
+  "dependencies": {
+    "@antfu/ni": "^0.21.4",
+    "@babel/core": "^7.22.1",
+    "@babel/parser": "^7.22.6",
+    "@babel/plugin-transform-typescript": "^7.22.5",
+    "chalk": "5.2.0",
+    "commander": "^10.0.0",
+    "cosmiconfig": "^8.1.3",
+    "diff": "^5.1.0",
+    "execa": "^7.0.0",
+    "fast-glob": "^3.3.2",
+    "fs-extra": "^11.2.0",
+    "https-proxy-agent": "^6.2.0",
+    "lodash.template": "^4.5.0",
+    "node-fetch": "^3.3.0",
+    "ora": "^6.1.2",
+    "prompts": "^2.4.2",
+    "recast": "^0.23.2",
+    "ts-morph": "^18.0.0",
+    "tsconfig-paths": "^4.2.0",
+    "zod": "^3.20.2"
   },
   "devDependencies": {
+    "@types/babel__core": "^7.20.1",
+    "@types/diff": "^5.0.3",
+    "@types/fs-extra": "^11.0.1",
+    "@types/lodash.template": "^4.5.1",
+    "@types/prompts": "^2.4.2",
     "prettier": "^3.0.0",
-    "turbo": "^2.0.0",
-    "typescript": "^4.9.3"
+    "rimraf": "^4.1.3",
+    "tsup": "^6.6.3",
+    "type-fest": "^3.8.0",
+    "typescript": "^4.9.3",
+    "vite-tsconfig-paths": "^4.3.1",
+    "vitest": "^1.2.2"
   }
 }
